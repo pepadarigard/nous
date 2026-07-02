@@ -1,0 +1,404 @@
+// «Мозг» приложения. Наш ИИ НЕ придумывает план — он:
+//  1) собирает готовый промт для внешнего ИИ (buildPlanPrompt, чистая функция);
+//  2) раскладывает ответ внешнего ИИ в структуру (importPlan — сначала прямой JSON, потом ИИ-подстраховка);
+//  3) отвечает в чате (tutorChat).
+
+import type { AppConfig, Block, Lesson, StudyPlan, SubjectGoal, SubjectSchedule } from '../types'
+import { groqRaw, isTauri, uid, type GroqBody } from './api'
+import { SUBJECTS, subjectName, WEEKDAYS } from '../data/subjects'
+
+function useMock(): boolean {
+  if (isTauri) return false
+  try {
+    return localStorage.getItem('ege_real_ai') !== '1'
+  } catch {
+    return true
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+function isRateLimit(e: unknown): boolean {
+  const m = String((e as any)?.message ?? e).toLowerCase()
+  return m.includes('rate limit') || m.includes('429') || m.includes('too many') || m.includes('rate_limit')
+}
+
+async function groqRawRetry(apiKey: string, body: GroqBody): Promise<any> {
+  let last: unknown
+  for (let i = 0; i < 3; i++) {
+    try {
+      return await groqRaw(apiKey, body)
+    } catch (e) {
+      last = e
+      if (isRateLimit(e) && i < 2) {
+        await sleep(4500)
+        continue
+      }
+      throw e
+    }
+  }
+  throw last
+}
+
+const MATH_RULE =
+  'Математику пиши ПРОСТЫМ читаемым текстом Юникодом: √, π, ², ³, ≤, ≥, ×, ÷, ·, ⇒, ∈, ℤ, ℝ, дроби вида a/b, sin(2x), [0; π], x₁, log₂. ' +
+  'КАТЕГОРИЧЕСКИ НЕ используй LaTeX: никаких команд с обратным слэшем (\\frac, \\sqrt, \\Rightarrow, \\pi, \\mathbb, \\cdot, \\in и т.п.), фигурных скобок для степеней и знаков доллара $. ' +
+  'Пиши «⇒» вместо \\Rightarrow, «π» вместо \\pi, «a/b» вместо \\frac, «√(x)» вместо \\sqrt. Объясняй по шагам, коротко и понятно.'
+
+const REFERENCE_METHODOLOGY = `
+Опирайся на эту проверенную методику подготовки к ЕГЭ.
+
+РИТМ: будни — 1–2 коротких занятия в день; один день в неделю — полный выходной; минимум раз в неделю — разбор ошибок недели. Ученик ведёт таблицу слабых мест. «Правило одной задачи» в тяжёлый день.
+
+ПРАКТИКА: без авто-контрольных. Практика = решать РЕАЛЬНЫЕ задания по теме на РешуЕГЭ/СдамГИА и в открытом банке ФИПИ (информатика — kompege.ru). Формулируй конкретно: «реши 15–20 заданий №… по теме … на РешуЕГЭ».
+
+ПОВТОРЕНИЕ: регулярно вставляй занятия-повторение (kind="review"), которые ВОЗВРАЩАЮТСЯ к КОНКРЕТНЫМ ранее пройденным темам (перерешать задания по прошлой теме, разбор ошибок, прогон таблицы слабых мест) — чтобы материал закреплялся и запоминался. В описании review указывай, какую именно тему повторяем.
+
+ПОРЯДОК ТЕМ:
+• Математика профиль, часть 1: планиметрия, векторы, стереометрия, вероятность, теоремы о вероятностях, простейшие уравнения, вычисления/преобразования (степени, корни, логарифмы, тригонометрия), производная и первообразная, задачи с физ. смыслом, текстовые задачи, графики функций, наиб./наим. Часть 2: 13 (уравнения), 15 (неравенства), 14 (стереометрия), далее 16–19.
+• Информатика (КЕГЭ): ручные — системы счисления, кодирование, логика, графы, исполнители, теория игр; на Python — обработка чисел/строк, файлы/сортировка, задания 26 и 27. С первого дня — kompege.ru.
+• Русский: 1–3 анализ текста, 4 ударения, 5–8 нормы, 9–15 орфография, 16–21 пунктуация, 22–26 текст и выразительность, 27 сочинение.
+
+ПРИНЦИПЫ: не переходить к новой теме, пока не закрыта текущая; каждые 2–3 недели — полный пробник; сначала фундамент, потом сложное.
+РЕСУРСЫ: ФИПИ, РешуЕГЭ/СдамГИА, kompege.ru, К. Поляков, Школково.
+`.trim()
+
+function toSup(e: string): string {
+  const SUP: Record<string, string> = {
+    '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+    '+': '⁺', '-': '⁻', '−': '⁻', '(': '⁽', ')': '⁾', n: 'ⁿ', x: 'ˣ', i: 'ⁱ',
+  }
+  const t = e.trim()
+  if (t.length > 0 && [...t].every((c) => c in SUP)) return [...t].map((c) => SUP[c]).join('')
+  return '^(' + t + ')'
+}
+
+function toSub(e: string): string {
+  const SUB: Record<string, string> = {
+    '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+    '+': '₊', '-': '₋', '−': '₋', '=': '₌', '(': '₍', ')': '₎',
+    a: 'ₐ', e: 'ₑ', h: 'ₕ', i: 'ᵢ', j: 'ⱼ', k: 'ₖ', l: 'ₗ', m: 'ₘ', n: 'ₙ', o: 'ₒ', p: 'ₚ', r: 'ᵣ', s: 'ₛ', t: 'ₜ', u: 'ᵤ', v: 'ᵥ', x: 'ₓ',
+  }
+  const t = e.trim()
+  if (t.length > 0 && [...t].every((c) => c in SUB)) return [...t].map((c) => SUB[c]).join('')
+  return '_' + t
+}
+
+// Полный набор LaTeX-команд → Юникод, чтобы в чате не оставалось «Rightarrow», «mathbb{Z}» и т.п.
+const LATEX_MAP: Record<string, string> = {
+  // греческие
+  '\\pi': 'π', '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\delta': 'δ', '\\epsilon': 'ε', '\\varepsilon': 'ε',
+  '\\zeta': 'ζ', '\\eta': 'η', '\\theta': 'θ', '\\vartheta': 'θ', '\\iota': 'ι', '\\kappa': 'κ', '\\lambda': 'λ',
+  '\\mu': 'μ', '\\nu': 'ν', '\\xi': 'ξ', '\\rho': 'ρ', '\\sigma': 'σ', '\\tau': 'τ', '\\upsilon': 'υ', '\\phi': 'φ',
+  '\\varphi': 'φ', '\\chi': 'χ', '\\psi': 'ψ', '\\omega': 'ω',
+  '\\Gamma': 'Γ', '\\Delta': 'Δ', '\\Theta': 'Θ', '\\Lambda': 'Λ', '\\Xi': 'Ξ', '\\Pi': 'Π', '\\Sigma': 'Σ',
+  '\\Phi': 'Φ', '\\Psi': 'Ψ', '\\Omega': 'Ω',
+  // операторы
+  '\\cdot': '·', '\\times': '×', '\\div': '÷', '\\pm': '±', '\\mp': '∓', '\\ast': '∗', '\\star': '⋆',
+  '\\leq': '≤', '\\le': '≤', '\\geq': '≥', '\\ge': '≥', '\\neq': '≠', '\\ne': '≠', '\\approx': '≈',
+  '\\equiv': '≡', '\\cong': '≅', '\\sim': '∼', '\\propto': '∝', '\\ll': '≪', '\\gg': '≫',
+  '\\infty': '∞', '\\partial': '∂', '\\nabla': '∇', '\\sum': '∑', '\\prod': '∏', '\\int': '∫',
+  '\\sqrt': '√', '\\angle': '∠', '\\perp': '⊥', '\\parallel': '∥', '\\degree': '°', '\\circ': '°', '\\deg': '°',
+  // множества и логика
+  '\\in': '∈', '\\notin': '∉', '\\ni': '∋', '\\subset': '⊂', '\\subseteq': '⊆', '\\supset': '⊃', '\\supseteq': '⊇',
+  '\\cup': '∪', '\\cap': '∩', '\\emptyset': '∅', '\\varnothing': '∅', '\\setminus': '\\',
+  '\\forall': '∀', '\\exists': '∃', '\\nexists': '∄', '\\neg': '¬', '\\land': '∧', '\\lor': '∨',
+  '\\mathbb{R}': 'ℝ', '\\mathbb{Z}': 'ℤ', '\\mathbb{N}': 'ℕ', '\\mathbb{Q}': 'ℚ', '\\mathbb{C}': 'ℂ',
+  // стрелки
+  '\\Rightarrow': '⇒', '\\Leftarrow': '⇐', '\\Leftrightarrow': '⇔', '\\iff': '⇔', '\\implies': '⇒',
+  '\\rightarrow': '→', '\\to': '→', '\\leftarrow': '←', '\\leftrightarrow': '↔', '\\mapsto': '↦', '\\gets': '←',
+  // многоточия и пробелы
+  '\\ldots': '…', '\\dots': '…', '\\cdots': '…', '\\quad': ' ', '\\qquad': '  ',
+}
+
+// gentle=true — для чата: чистим только LaTeX/математику, но СОХРАНЯЕМ markdown (**, ###, списки),
+// скобки {} и отступы, чтобы разметку отрисовал mdToHtml. Обычный режим (для плана) вырезает всё.
+export function cleanMath(input: string, gentle = false): string {
+  if (!input) return input
+  let s = String(input)
+  s = s.split('').filter((ch) => { const k = ch.charCodeAt(0); return k >= 32 || k === 9 || k === 10 || k === 13 }).join('')
+  s = s.replace(/\${1,2}/g, '')
+  if (!gentle) s = s.replace(/\*\*|__/g, '')
+  s = s.replace(/\\left\s*|\\right\s*/g, '')
+  // обёртки-«шрифты»: оставляем содержимое
+  s = s.replace(/\\(?:text|mathrm|mathbf|mathit|mathsf|operatorname|boxed)\s*\{([^{}]*)\}/g, '$1')
+  s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, '√($1)')
+  s = s.replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '($1)/($2)')
+  // надстрочные: {..}, число, одиночная буква (x^n → xⁿ)
+  s = s.replace(/\^\{([^{}]*)\}/g, (_m, e) => toSup(e))
+  s = s.replace(/\^(-?\d+)/g, (_m, d) => toSup(d))
+  s = s.replace(/\^([A-Za-zА-Яа-я])/g, (_m, c) => toSup(c))
+  // подстрочные: только явные {..} (голый _ не трогаем — это ломало бы snake_case в коде Python)
+  s = s.replace(/_\{([^{}]*)\}/g, (_m, e) => toSub(e))
+  for (const [k, v] of Object.entries(LATEX_MAP)) s = s.split(k).join(v)
+  // \mathbb{X} для нестандартных букв (ℝℤℕℚℂ уже заменены выше) → сама буква
+  s = s.replace(/\\mathbb\s*\{([^{}]*)\}/g, '$1')
+  s = s.replace(/\\(sin|cos|tan|cot|ctg|tg|sec|csc|log|ln|lim|exp|arcsin|arccos|arctan|arcctg|min|max)\b/g, '$1')
+  s = s.replace(/\\([a-zA-Zа-яА-Я]+)/g, '$1')
+  if (!gentle) {
+    s = s.replace(/[{}]/g, '')
+    s = s.replace(/[ \t]{2,}/g, ' ')
+  }
+  return s.trim()
+}
+
+function extractJson(text: string): any {
+  let t = (text || '').trim()
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fence) t = fence[1].trim()
+  try {
+    return JSON.parse(t)
+  } catch {
+    /* пробуем вырезать */
+  }
+  const s = t.indexOf('{')
+  const e = t.lastIndexOf('}')
+  if (s !== -1 && e > s) {
+    try {
+      return JSON.parse(t.slice(s, e + 1))
+    } catch {
+      /* всё */
+    }
+  }
+  throw new Error('Не удалось разобрать JSON')
+}
+
+interface CallOpts {
+  system: string
+  user: string
+  temperature?: number
+  maxTokens?: number
+}
+async function callJSON(cfg: AppConfig, opts: CallOpts): Promise<any> {
+  const base: GroqBody = {
+    model: cfg.textModel,
+    messages: [
+      { role: 'system', content: opts.system },
+      { role: 'user', content: opts.user },
+    ],
+    temperature: opts.temperature ?? 0.3,
+    max_tokens: opts.maxTokens ?? 4000,
+  }
+  const attempts: GroqBody[] = [
+    { ...base, response_format: { type: 'json_object' }, reasoning_format: 'hidden' },
+    { ...base, reasoning_format: 'hidden' },
+    { ...base },
+  ]
+  let lastErr: unknown
+  for (const body of attempts) {
+    try {
+      const resp = await groqRawRetry(cfg.apiKey, body)
+      const c: string = resp?.choices?.[0]?.message?.content ?? ''
+      if (!c.trim()) {
+        lastErr = new Error('Пустой ответ ИИ')
+        continue
+      }
+      return extractJson(c)
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('Ошибка обращения к ИИ')
+}
+
+function coerceLessons(arr: any[]): Lesson[] {
+  return (arr || [])
+    .filter((l) => l && (l.title || l.description))
+    .map((l) => {
+      let kind: Lesson['kind'] = l.kind === 'theory' || l.kind === 'practice' || l.kind === 'review' ? l.kind : 'practice'
+      if (l.kind === 'control') kind = 'practice'
+      return {
+        id: uid('les_'),
+        title: cleanMath(String(l.title || 'Занятие')),
+        kind,
+        description: cleanMath(String(l.description || '')),
+        done: false,
+      }
+    })
+}
+
+export interface PromptInput {
+  subjects: string[]
+  goals: SubjectGoal[]
+  schedules: SubjectSchedule[]
+  examDate?: string
+  studentName?: string
+  notes?: string
+}
+
+/** Собирает готовый промт для внешнего ИИ (ChatGPT/DeepSeek). Чистая функция, без запроса. */
+export function buildPlanPrompt(input: PromptInput): string {
+  const lines = input.subjects
+    .map((id) => {
+      const g = input.goals.find((x) => x.subjectId === id)
+      const s = input.schedules.find((x) => x.subjectId === id)
+      const days = s?.days?.length ? s.days.map((d) => WEEKDAYS.find((w) => w.n === d)?.short).join(',') : 'будни'
+      return `- ${subjectName(id)} (id: ${id}): сейчас ~${g?.current ?? '?'} → цель ${g?.target ?? '?'} баллов; дни занятий: ${days}, ${s?.hoursPerWeek ?? '?'} ч/нед`
+    })
+    .join('\n')
+  const ids = input.subjects.join(', ')
+  return [
+    `Ты — опытный репетитор и методист ЕГЭ. Составь подробный персональный план подготовки${input.studentName ? ` для ученика по имени ${input.studentName}` : ''}.`,
+    '',
+    'ДАННЫЕ УЧЕНИКА:',
+    lines,
+    input.examDate ? `Дата экзамена: ${input.examDate}.` : 'Дата экзамена: не указана.',
+    input.notes ? `\nПОЖЕЛАНИЯ И ОТВЕТЫ УЧЕНИКА (учти обязательно): ${input.notes}` : '',
+    '',
+    'МЕТОДИКА (следуй строго):',
+    REFERENCE_METHODOLOGY,
+    '',
+    'ТРЕБОВАНИЯ:',
+    '- Разбей на тематические блоки; внутри — короткие занятия: теория (kind="theory"), практика (kind="practice"), повторение (kind="review").',
+    '- Практика = решать реальные задания по теме на РешуЕГЭ/ФИПИ (информатика — kompege.ru); в описании указывай что и где решать.',
+    '- Никаких контрольных/тестов. Регулярно вставляй повторение. Описание занятия — конкретное и короткое.',
+    '- Двигайся от фундамента к сложному; покрой всю программу до цели.',
+    '',
+    'ФОРМАТ ОТВЕТА — ОЧЕНЬ ВАЖНО:',
+    `Верни ТОЛЬКО валидный JSON (без пояснений и без markdown-заборов). Поле subjectId бери СТРОГО из: ${ids}.`,
+    'Схема:',
+    '{"overview":"1-2 мотивирующих предложения","blocks":[{"subjectId":"<id>","title":"тема блока","goal":"цель блока","lessons":[{"title":"название занятия","kind":"theory|practice|review","description":"что именно делать"}]}]}',
+  ].join('\n')
+}
+
+export interface ImportResult {
+  blocks: Block[]
+  subjects: string[]
+  overview: string
+}
+
+/** Раскладывает ответ внешнего ИИ в структуру. Сначала прямой JSON (надёжно, без обрывов), потом ИИ-подстраховка. */
+export async function importPlan(cfg: AppConfig, text: string, onProgress?: (m: string) => void): Promise<ImportResult> {
+  onProgress?.('Раскладываю план…')
+  const idSet = new Set(SUBJECTS.map((s) => s.id))
+  let data: any = null
+  try {
+    data = extractJson(text)
+  } catch {
+    /* не JSON */
+  }
+  const hasBlocks = data && Array.isArray(data.blocks) && data.blocks.length > 0
+
+  if (!hasBlocks) {
+    if (useMock()) {
+      return { blocks: mockBlocks('math_prof', 'Импортированный план'), subjects: ['math_prof'], overview: 'Демо-план (в браузере ИИ выключен).' }
+    }
+    onProgress?.('Привожу план к нужному виду через ИИ…')
+    const ids = SUBJECTS.map((s) => s.id)
+    data = await callJSON(cfg, {
+      system:
+        'Ты превращаешь готовый план подготовки к ЕГЭ (текст от другого ИИ) в JSON, СОХРАНЯЯ содержание. Отвечай только валидным JSON. ' +
+        MATH_RULE,
+      user:
+        `План:\n"""\n${text.slice(0, 12000)}\n"""\n\n` +
+        `Верни JSON: {"overview":"","blocks":[{"subjectId":"<id>","title":"","goal":"","lessons":[{"title":"","kind":"theory|practice|review","description":""}]}]}. ` +
+        `subjectId СТРОГО из: ${ids.join(', ')}. Если план большой — сгруппируй по темам/неделям (до ~10 блоков), сохраняя суть.`,
+      temperature: 0.2,
+      maxTokens: 5000,
+    })
+  }
+
+  const blocks: Block[] = ((data?.blocks || []) as any[])
+    .filter((b) => b && (b.title || b.lessons))
+    .map((b, i) => ({
+      id: uid('blk_'),
+      subjectId: idSet.has(b.subjectId) ? b.subjectId : SUBJECTS[0].id,
+      title: cleanMath(String(b.title || `Блок ${i + 1}`)),
+      goal: cleanMath(String(b.goal || '')),
+      order: i,
+      lessons: coerceLessons(b.lessons || []),
+    }))
+  const subjects = [...new Set(blocks.map((b) => b.subjectId))]
+  return { blocks, subjects, overview: cleanMath(String(data?.overview || 'Твой план подготовки.')) }
+}
+
+/** Чат-репетитор. */
+export async function tutorChat(cfg: AppConfig, messages: { role: string; content: string }[]): Promise<string> {
+  if (useMock()) return 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
+  const resp = await groqRawRetry(cfg.apiKey, {
+    model: cfg.textModel,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Ты — терпеливый и умный репетитор по подготовке к ЕГЭ. Объясняешь понятно, по шагам, с примерами, по-русски. Если уместно — предложи какие задания порешать на РешуЕГЭ/ФИПИ. ' +
+          'Оформляй ответ в Markdown: подзаголовки (##), списки (- ), жирный (**важное**) — так удобнее читать. ' +
+          MATH_RULE,
+      },
+      ...messages,
+    ],
+    temperature: 0.6,
+    max_tokens: 2000,
+    reasoning_format: 'hidden',
+  })
+  return cleanMath(resp?.choices?.[0]?.message?.content ?? '', true)
+}
+
+/**
+ * «Дописать план»: ученик обычными словами говорит, что добавить, а наш ИИ генерирует
+ * НОВЫЕ блоки/занятия строго по этой теме (не повторяя имеющиеся). Возвращает блоки для append.
+ * Существующий план не трогаем — только дополняем.
+ */
+export async function extendPlan(cfg: AppConfig, plan: StudyPlan, wish: string, onProgress?: (m: string) => void): Promise<Block[]> {
+  const add = wish.trim()
+  if (!add) return []
+  onProgress?.('ИИ дополняет план…')
+  const startOrder = plan.blocks.length
+  const idSet = new Set(SUBJECTS.map((s) => s.id))
+  const fallbackSubject = plan.blocks[0]?.subjectId || SUBJECTS[0].id
+  if (useMock()) {
+    return mockBlocks(fallbackSubject, `Дополнение: ${add}`).map((b, i) => ({ ...b, order: startOrder + i }))
+  }
+  const covered = plan.blocks.map((b) => `${subjectName(b.subjectId)}: ${b.title}`).slice(0, 60).join('; ')
+  const ids = SUBJECTS.map((s) => s.id)
+  const data = await callJSON(cfg, {
+    system:
+      'Ты ДОПОЛНЯЕШЬ уже существующий план подготовки к ЕГЭ новыми занятиями по пожеланию ученика. ' +
+      'НЕ повторяй уже имеющиеся темы. Практика = решать реальные задания по теме на РешуЕГЭ/ФИПИ (информатика — kompege.ru). ' +
+      'Добавляй и повторение (kind="review"). Отвечай ТОЛЬКО валидным JSON. ' +
+      MATH_RULE,
+    user:
+      `Уже есть блоки: ${covered || '(план пуст)'}\n\n` +
+      `ПОЖЕЛАНИЕ УЧЕНИКА — что добавить: ${add}\n\n` +
+      `Верни JSON ТОЛЬКО с НОВЫМИ блоками строго по этому пожеланию: ` +
+      `{"blocks":[{"subjectId":"<id>","title":"тема","goal":"цель","lessons":[{"title":"название","kind":"theory|practice|review","description":"что делать"}]}]}. ` +
+      `subjectId СТРОГО из: ${ids.join(', ')}. Сделай 1–4 блока по теме пожелания, по 3–6 коротких занятий в каждом.`,
+    temperature: 0.4,
+    maxTokens: 4000,
+  })
+  return ((data?.blocks || []) as any[])
+    .filter((b) => b && (b.title || b.lessons))
+    .map((b, i) => ({
+      id: uid('blk_'),
+      subjectId: idSet.has(b.subjectId) ? b.subjectId : fallbackSubject,
+      title: cleanMath(String(b.title || `Дополнение ${i + 1}`)),
+      goal: cleanMath(String(b.goal || '')),
+      order: startOrder + i,
+      lessons: coerceLessons(b.lessons || []),
+    }))
+    .filter((b) => b.lessons.length > 0)
+}
+
+// Демо-план для проверки интерфейса в браузере.
+function mockBlocks(subjectId: string, name: string): Block[] {
+  const mk = (title: string, order: number, lessons: [string, Lesson['kind'], string][]): Block => ({
+    id: uid('blk_'),
+    subjectId,
+    title,
+    goal: `Освоить тему «${title}».`,
+    order,
+    lessons: lessons.map(([t, k, d]) => ({ id: uid('les_'), title: t, kind: k, description: d, done: false })),
+  })
+  return [
+    mk(`Основы: ${name}`, 0, [
+      ['Теория базовых понятий', 'theory', 'Разбор ключевой теории.'],
+      ['Практика на РешуЕГЭ', 'practice', 'Реши 15 заданий по теме на РешуЕГЭ.'],
+      ['Повторение', 'review', 'Разбор ошибок недели.'],
+    ]),
+    mk(`Продвинутые темы: ${name}`, 1, [
+      ['Теория', 'theory', 'Сложные темы блока.'],
+      ['Практика', 'practice', 'Реши задания уровня выше на РешуЕГЭ/ФИПИ.'],
+      ['Повторение', 'review', 'Прогон таблицы слабых мест.'],
+    ]),
+  ]
+}
