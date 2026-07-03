@@ -4,8 +4,12 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::Manager;
 
-const GROQ_CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODELS_URL: &str = "https://api.groq.com/openai/v1/models";
+/// Разрешённые сервисы ИИ: Groq (нужен VPN в РФ), OpenRouter и Cerebras (работают в РФ без VPN).
+fn allowed_api(url: &str) -> bool {
+    url.starts_with("https://api.groq.com/")
+        || url.starts_with("https://openrouter.ai/")
+        || url.starts_with("https://api.cerebras.ai/")
+}
 
 /// Один HTTP-клиент на всё приложение + таймаут, чтобы запрос не завис навсегда.
 fn http() -> &'static reqwest::Client {
@@ -63,13 +67,18 @@ fn save_state(app: tauri::AppHandle, data: String) -> Result<(), String> {
     fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-/// Прокси-запрос к Groq (chat/completions). Тело формируется на фронте, ключ здесь.
+/// Прокси-запрос к провайдеру ИИ (OpenAI-совместимый chat/completions). Тело формируется на фронте.
 #[tauri::command]
-async fn groq_request(api_key: String, body: String) -> Result<String, String> {
+async fn llm_request(api_key: String, body: String, base: String) -> Result<String, String> {
+    let url = format!("{}/chat/completions", base.trim_end_matches('/'));
+    if !allowed_api(&url) {
+        return Err("Недопустимый адрес сервиса ИИ".into());
+    }
     let resp = http()
-        .post(GROQ_CHAT_URL)
+        .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
+        .header("X-Title", "Nous")
         .body(body)
         .send()
         .await
@@ -77,12 +86,16 @@ async fn groq_request(api_key: String, body: String) -> Result<String, String> {
     resp.text().await.map_err(|e| e.to_string())
 }
 
-/// Список моделей аккаунта (для проверки ключа).
+/// GET с авторизацией к провайдеру (список моделей, проверка ключа).
 #[tauri::command]
-async fn groq_models(api_key: String) -> Result<String, String> {
+async fn llm_get(api_key: String, url: String) -> Result<String, String> {
+    if !allowed_api(&url) {
+        return Err("Недопустимый адрес сервиса ИИ".into());
+    }
     let resp = http()
-        .get(GROQ_MODELS_URL)
+        .get(&url)
         .header("Authorization", format!("Bearer {}", api_key))
+        .header("X-Title", "Nous")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -143,8 +156,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_state,
             save_state,
-            groq_request,
-            groq_models,
+            llm_request,
+            llm_get,
             github_latest,
             export_state,
             reveal_path

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { checkApiKey, humanError, isTauri, openExternal, saveState } from '../lib/api'
 import { chatModels, modelLabel, modelScore, pickBestModel } from '../lib/models'
+import { PROVIDERS, activeKey } from '../lib/providers'
 import { appVersion, checkUpdate, GITHUB_URL, type UpdateInfo } from '../lib/update'
 import { subjectName } from '../data/subjects'
-import type { AppData } from '../types'
+import type { AppData, Provider } from '../types'
 import Modal from '../ui/Modal'
 import PlanImporter from './PlanImporter'
 import PlanExtender from './PlanExtender'
@@ -16,7 +17,15 @@ export default function Settings() {
   const setExamDate = useStore((s) => s.setExamDate)
   const resetAll = useStore((s) => s.resetAll)
 
-  const [apiKey, setApiKey] = useState(data.config.apiKey)
+  const [prov, setProv] = useState<Provider>(data.config.provider && PROVIDERS[data.config.provider] ? data.config.provider : 'groq')
+  const [keys, setKeys] = useState<Record<Provider, string>>({
+    groq: data.config.apiKey,
+    openrouter: data.config.apiKeyOr || '',
+    cerebras: data.config.apiKeyCb || '',
+  })
+  const apiKey = keys[prov]
+  const setApiKey = (v: string) => setKeys((k) => ({ ...k, [prov]: v }))
+  const pInfo = PROVIDERS[prov]
   const [textModel, setTextModel] = useState(data.config.textModel)
   const showEstimate = data.config.showEstimate !== false
   const soundOn = data.config.soundOn !== false
@@ -43,35 +52,56 @@ export default function Settings() {
 
   useEffect(() => {
     appVersion().then(setVersion)
-    if (data.config.apiKey) {
-      checkApiKey(data.config.apiKey).then((r) => {
+    const k = activeKey(data.config)
+    if (k) {
+      checkApiKey(k, data.config.provider ?? 'groq').then((r) => {
         if (r.ok && r.models?.length) setAvailable(r.models)
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const best = available ? pickBestModel(available) : null
+  // Смена провайдера: перечитываем его модели и СРАЗУ ставим самую сильную из бесплатных.
+  function switchProv(p: Provider) {
+    if (p === prov) return
+    setProv(p)
+    setAvailable(null)
+    setCheckMsg(null)
+    setTextModel(PROVIDERS[p].defaultModel) // модель прошлого провайдера здесь не работает
+    const k = keys[p]
+    if (k || p === 'openrouter') {
+      // у OpenRouter список моделей публичный — подтянем даже без ключа
+      checkApiKey(k, p).then((r) => {
+        if (r.models?.length) {
+          setAvailable(r.models)
+          const best = pickBestModel(r.models, p)
+          if (best) setTextModel(best)
+        }
+      })
+    }
+  }
+
+  const best = available ? pickBestModel(available, prov) : null
   const smarter = best && modelScore(best) > modelScore(textModel) ? best : null
 
   function save() {
-    setConfig({ apiKey, textModel })
+    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, textModel })
     setSaved(true)
     setTimeout(() => setSaved(false), 1600)
   }
   async function check() {
     setChecking(true)
     setCheckMsg(null)
-    const r = await checkApiKey(apiKey)
+    const r = await checkApiKey(apiKey, prov)
     setChecking(false)
     setCheckMsg(r.ok ? { ok: true, text: `Рабочий. Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: humanError(r.error || 'Ошибка') })
-    if (r.ok && r.models?.length) setAvailable(r.models)
+    if (r.models?.length) setAvailable(r.models)
   }
 
   function useSmartest() {
     if (!smarter) return
     setTextModel(smarter)
-    setConfig({ textModel: smarter, modelAutoPicked: true })
+    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, textModel: smarter, modelAutoPicked: true })
   }
 
   async function doExport() {
@@ -146,17 +176,35 @@ export default function Settings() {
       </div>
 
       <div className="card" style={{ marginBottom: 18 }}>
-        <h3><KeyRound size={16} style={{ verticalAlign: -2, marginRight: 6 }} />ИИ (Groq)</h3>
+        <h3><KeyRound size={16} style={{ verticalAlign: -2, marginRight: 6 }} />ИИ</h3>
+        <label className="field" style={{ marginBottom: 8 }}>
+          <span>Провайдер</span>
+        </label>
+        <div className="seg" style={{ marginBottom: 6 }}>
+          <button className={'seg-btn' + (prov === 'openrouter' ? ' on' : '')} onClick={() => switchProv('openrouter')}>
+            🇷🇺 OpenRouter
+          </button>
+          <button className={'seg-btn' + (prov === 'cerebras' ? ' on' : '')} onClick={() => switchProv('cerebras')}>
+            🚀 Cerebras
+          </button>
+          <button className={'seg-btn' + (prov === 'groq' ? ' on' : '')} onClick={() => switchProv('groq')}>
+            ⚡ Groq (VPN)
+          </button>
+        </div>
+        <p className="small muted" style={{ marginTop: 0 }}>
+          {pInfo.name}: {pInfo.hint}.{' '}
+          <a href={pInfo.keysUrl} onClick={(e) => { e.preventDefault(); openExternal(pInfo.keysUrl) }}>Получить ключ {pInfo.name}</a>
+        </p>
         <label className="field">
-          <span>API-ключ</span>
-          <input className="input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="gsk_..." />
+          <span>API-ключ {pInfo.name}</span>
+          <input className="input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={pInfo.keyPrefix + '...'} />
         </label>
         <label className="field">
           <span>Модель</span>
           <select className="select" value={textModel} onChange={(e) => setTextModel(e.target.value)}>
             {(() => {
               // Реальный список с ключа (по уму), иначе — текущая модель как есть.
-              const ids = available ? chatModels(available).sort((a, b) => modelScore(b) - modelScore(a)) : []
+              const ids = available ? chatModels(available, prov).sort((a, b) => modelScore(b) - modelScore(a)) : []
               if (!ids.includes(textModel)) ids.unshift(textModel)
               return ids.map((id) => {
                 const m = modelLabel(id)

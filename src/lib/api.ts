@@ -1,7 +1,8 @@
 // Слой доступа к платформе. Работает и в Tauri (боевое .exe), и в браузере (для разработки).
 // В Tauri — вызовы Rust-команд; в браузере — localStorage + прямой fetch/файловый input.
 
-import type { AppData } from '../types'
+import type { AppData, Provider } from '../types'
+import { PROVIDERS } from './providers'
 
 export const isTauri =
   typeof window !== 'undefined' &&
@@ -49,52 +50,73 @@ export interface GroqBody {
 }
 
 /**
- * Низкоуровневый запрос к Groq. Возвращает распарсенный JSON-ответ Groq целиком.
- * В Tauri идёт через Rust (без CORS, ключ на стороне Rust). В браузере — прямой fetch.
+ * Низкоуровневый запрос к провайдеру ИИ (OpenAI-совместимый chat/completions).
+ * В Tauri идёт через Rust (без CORS). В браузере — прямой fetch.
  */
-export async function groqRaw(apiKey: string, body: GroqBody): Promise<any> {
-  const bodyStr = JSON.stringify(body)
+export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider = 'groq'): Promise<any> {
+  const p = PROVIDERS[provider]
+  const payload: Record<string, unknown> = { ...body }
+  if (provider !== 'groq') delete payload.reasoning_format // параметр только Groq — другие провайдеры его не знают
+  const bodyStr = JSON.stringify(payload)
   let text: string
   if (isTauri) {
-    text = await invoke<string>('groq_request', { apiKey, body: bodyStr })
+    text = await invoke<string>('llm_request', { apiKey, body: bodyStr, base: p.base })
   } else {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const res = await fetch(`${p.base}/chat/completions`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
+        'X-Title': 'Nous',
       },
       body: bodyStr,
     })
     text = await res.text()
-    if (!res.ok) throw new Error(`Groq HTTP ${res.status}: ${text.slice(0, 300)}`)
+    if (!res.ok && !text.trim().startsWith('{')) throw new Error(`${p.name} HTTP ${res.status}: ${text.slice(0, 300)}`)
   }
   let parsed: any
   try {
     parsed = JSON.parse(text)
   } catch {
-    throw new Error(`Groq вернул не-JSON: ${text.slice(0, 200)}`)
+    throw new Error(`${p.name} вернул не-JSON: ${text.slice(0, 200)}`)
   }
   if (parsed?.error) {
-    throw new Error(parsed.error.message || 'Ошибка Groq API')
+    throw new Error(parsed.error.message || `Ошибка ${p.name} API`)
   }
   return parsed
 }
 
-/** Проверка ключа: делает лёгкий запрос к списку моделей. */
-export async function checkApiKey(apiKey: string): Promise<{ ok: boolean; error?: string; models?: string[] }> {
+/** GET с авторизацией к провайдеру (список моделей, проверка ключа). Возвращает распарсенный JSON. */
+async function authGet(apiKey: string, url: string): Promise<any> {
+  let text: string
+  if (isTauri) {
+    text = await invoke<string>('llm_get', { apiKey, url })
+  } else {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } })
+    text = await res.text()
+  }
   try {
-    if (isTauri) {
-      const text = await invoke<string>('groq_models', { apiKey })
-      const parsed = JSON.parse(text)
-      if (parsed?.error) return { ok: false, error: parsed.error.message }
-      return { ok: true, models: (parsed.data || []).map((m: any) => m.id) }
+    return JSON.parse(text)
+  } catch {
+    throw new Error(`Сервис вернул не-JSON: ${text.slice(0, 200)}`)
+  }
+}
+
+/** Проверка ключа провайдера + список моделей. */
+export async function checkApiKey(apiKey: string, provider: Provider = 'groq'): Promise<{ ok: boolean; error?: string; models?: string[] }> {
+  const p = PROVIDERS[provider]
+  try {
+    if (provider === 'openrouter') {
+      // /models у OpenRouter публичный (список вернём в любом случае), а ключ проверяем отдельным эндпоинтом.
+      const models = await authGet(apiKey, `${p.base}/models`)
+        .then((r) => ((r?.data || []) as any[]).map((m: any) => m.id))
+        .catch(() => [] as string[])
+      const auth = await authGet(apiKey, `${p.base}/auth/key`)
+      if (auth?.error) return { ok: false, error: auth.error.message || 'Ключ не подошёл', models }
+      return { ok: true, models }
     }
-    const res = await fetch('https://api.groq.com/openai/v1/models', {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    })
-    const parsed = await res.json()
-    if (!res.ok) return { ok: false, error: parsed?.error?.message || `HTTP ${res.status}` }
+    const parsed = await authGet(apiKey, `${p.base}/models`)
+    if (parsed?.error) return { ok: false, error: parsed.error.message || 'Ошибка' }
     return { ok: true, models: (parsed.data || []).map((m: any) => m.id) }
   } catch (e: any) {
     return { ok: false, error: e?.message || 'Сеть недоступна' }
@@ -113,7 +135,8 @@ export function humanError(e: unknown): string {
   if (/invalid api key|401|unauthorized|invalid_api_key/.test(low)) return 'Неверный API-ключ. Проверь его в Настройках.'
   if (/rate limit|429|too many/.test(low)) return 'Лимит запросов Groq исчерпан — подожди минуту и попробуй ещё раз.'
   if (/timed? ?out|timeout/.test(low)) return 'Сервер не ответил вовремя. Проверь интернет и попробуй ещё раз.'
-  if (/error sending request|dns|connect|network|failed to fetch|отправки запроса/.test(low)) return 'Нет соединения с интернетом (или Groq недоступен).'
+  if (/error sending request|dns|connect|network|failed to fetch|отправки запроса/.test(low))
+    return 'Нет соединения с сервером ИИ. Если ты в России и без VPN — переключи провайдера на OpenRouter в Настройках (он работает без VPN).'
   if (/413|too large|context length|maximum context/.test(low)) return 'Запрос слишком длинный для модели.'
   return m || 'Неизвестная ошибка.'
 }

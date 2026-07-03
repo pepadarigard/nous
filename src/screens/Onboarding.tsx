@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { SUBJECTS, WEEKDAYS, subjectName } from '../data/subjects'
 import { checkApiKey, humanError, isTauri, openExternal } from '../lib/api'
-import { modelLabel, modelScore, pickBestModel } from '../lib/models'
+import { modelLabel, pickBestModel } from '../lib/models'
+import { PROVIDERS } from '../lib/providers'
+import type { Provider } from '../types'
 import { EGE_YEAR, EXAM_DATE_DEFAULT } from '../data/ege2027'
 import PlanImporter from './PlanImporter'
 import { Check, KeyRound, ArrowRight, ArrowLeft, Target, Sparkles } from 'lucide-react'
@@ -16,8 +18,18 @@ export default function Onboarding() {
   const store = useStore()
   const [step, setStep] = useState<Step>('welcome')
 
-  const [apiKey, setApiKey] = useState(store.data.config.apiKey)
+  // OpenRouter по умолчанию — работает в России без VPN (Groq для тех, у кого VPN есть).
+  const [prov, setProv] = useState<Provider>(store.data.config.provider ?? 'openrouter')
+  const [keys, setKeys] = useState<Record<Provider, string>>({
+    groq: store.data.config.apiKey || '',
+    openrouter: store.data.config.apiKeyOr || '',
+    cerebras: store.data.config.apiKeyCb || '',
+  })
+  const apiKey = keys[prov]
+  const pInfo = PROVIDERS[prov]
+  const setApiKey = (v: string) => setKeys((k) => ({ ...k, [prov]: v }))
   const [textModel, setTextModel] = useState(store.data.config.textModel)
+  const [pickedFor, setPickedFor] = useState<Provider | null>(null) // для какого провайдера подобрана textModel
   const [checking, setChecking] = useState(false)
   const [checkMsg, setCheckMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -34,14 +46,17 @@ export default function Onboarding() {
   async function doCheck() {
     setChecking(true)
     setCheckMsg(null)
-    const r = await checkApiKey(apiKey)
+    const r = await checkApiKey(apiKey, prov)
     setChecking(false)
     if (r.ok) {
-      // Сразу подбираем самую умную модель из доступных на этом ключе.
-      const best = r.models?.length ? pickBestModel(r.models) : null
-      if (best && modelScore(best) > modelScore(textModel)) setTextModel(best)
+      // Сразу подбираем самую сильную модель из доступных у провайдера (для OpenRouter — из бесплатных).
+      const best = r.models?.length ? pickBestModel(r.models, prov) : null
+      if (best) {
+        setTextModel(best)
+        setPickedFor(prov)
+      }
       const label = best ? modelLabel(best).label : null
-      setCheckMsg({ ok: true, text: `Ключ рабочий!${label ? ` Модель: ${label} (самая умная из доступных)` : ''}` })
+      setCheckMsg({ ok: true, text: `Ключ рабочий!${label ? ` Модель: ${label} (самая сильная из доступных)` : ''}` })
     } else {
       setCheckMsg({ ok: false, text: humanError(r.error || 'Ключ не подошёл') })
     }
@@ -69,18 +84,20 @@ export default function Onboarding() {
   }
 
   async function saveSetupAndNext() {
-    let model = textModel
-    // Если ключ не проверяли кнопкой — тихо подбираем лучшую модель прямо сейчас.
-    if (!checkMsg?.ok) {
+    // Модель считается подобранной, только если её выбирали под ТЕКУЩЕГО провайдера.
+    let model = pickedFor === prov ? textModel : ''
+    if (!model) {
+      // Тихо подбираем самую сильную прямо сейчас.
       try {
-        const r = await checkApiKey(apiKey)
-        const best = r.ok && r.models?.length ? pickBestModel(r.models) : null
-        if (best && modelScore(best) > modelScore(model)) model = best
+        const r = await checkApiKey(apiKey, prov)
+        const best = r.models?.length ? pickBestModel(r.models, prov) : null
+        if (best) model = best
       } catch {
         /* остаёмся на дефолте */
       }
     }
-    store.setConfig({ apiKey, textModel: model, modelAutoPicked: true })
+    if (!model) model = pInfo.defaultModel // сеть подвела — надёжный дефолт провайдера
+    store.setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, textModel: model, modelAutoPicked: true })
     setStep('subjects')
   }
   function saveSubjectsAndNext() {
@@ -157,17 +174,47 @@ export default function Onboarding() {
               <h1 style={{ margin: 0, fontSize: 24 }}>Настройка ИИ</h1>
             </div>
             <p className="muted" style={{ marginTop: 0 }}>
-              Наш ИИ раскладывает план и отвечает в чате. Работает на твоём ключе Groq. Получить бесплатный:{' '}
-              <a href="https://console.groq.com/keys" onClick={(e) => { e.preventDefault(); openExternal('https://console.groq.com/keys') }}>
-                console.groq.com/keys
-              </a>
+              ИИ работает на твоём бесплатном ключе. Выбери сервис:
+            </p>
+            <div className="grid cols-2" style={{ marginBottom: 14 }}>
+              <div className={'subject-card' + (prov === 'openrouter' ? ' sel' : '')} onClick={() => { setProv('openrouter'); setCheckMsg(null) }}>
+                <span className="emoji">🇷🇺</span>
+                <div>
+                  <div style={{ fontWeight: 700 }}>OpenRouter</div>
+                  <div className="small muted">работает в России без VPN · бесплатные модели</div>
+                </div>
+                <div className="check">{prov === 'openrouter' && <Check size={14} />}</div>
+              </div>
+              <div className={'subject-card' + (prov === 'cerebras' ? ' sel' : '')} onClick={() => { setProv('cerebras'); setCheckMsg(null) }}>
+                <span className="emoji">🚀</span>
+                <div>
+                  <div style={{ fontWeight: 700 }}>Cerebras</div>
+                  <div className="small muted">сверхбыстрый · щедрый бесплатный лимит</div>
+                </div>
+                <div className="check">{prov === 'cerebras' && <Check size={14} />}</div>
+              </div>
+              <div className={'subject-card' + (prov === 'groq' ? ' sel' : '')} onClick={() => { setProv('groq'); setCheckMsg(null) }}>
+                <span className="emoji">⚡</span>
+                <div>
+                  <div style={{ fontWeight: 700 }}>Groq</div>
+                  <div className="small muted">очень быстрый · в России нужен VPN</div>
+                </div>
+                <div className="check">{prov === 'groq' && <Check size={14} />}</div>
+              </div>
+            </div>
+            <p className="small muted" style={{ marginTop: 0 }}>
+              Получить бесплатный ключ {pInfo.name}:{' '}
+              <a href={pInfo.keysUrl} onClick={(e) => { e.preventDefault(); openExternal(pInfo.keysUrl) }}>
+                {pInfo.keysUrl.replace('https://', '')}
+              </a>{' '}
+              (регистрация → Create API Key → скопируй ключ)
             </p>
             <label className="field">
-              <span><KeyRound size={13} style={{ verticalAlign: -2, marginRight: 5 }} />API-ключ Groq</span>
-              <input className="input" type="password" placeholder="gsk_..." value={apiKey} onChange={(e) => { setApiKey(e.target.value); setCheckMsg(null) }} />
+              <span><KeyRound size={13} style={{ verticalAlign: -2, marginRight: 5 }} />API-ключ {pInfo.name}</span>
+              <input className="input" type="password" placeholder={pInfo.keyPrefix + '...'} value={apiKey} onChange={(e) => { setApiKey(e.target.value); setCheckMsg(null) }} />
             </label>
             <p className="small muted" style={{ marginTop: 0 }}>
-              🧠 Модель ИИ подберём автоматически — самую умную из доступных на твоём ключе (сменить можно в Настройках).
+              🧠 Модель ИИ подберём автоматически — самую умную из доступных (сменить можно в Настройках).
             </p>
             <div className="row" style={{ marginTop: 8 }}>
               <button className="btn btn-ghost" onClick={doCheck} disabled={!apiKey || checking}>{checking ? 'Проверяю…' : 'Проверить ключ'}</button>

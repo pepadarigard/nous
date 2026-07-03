@@ -1438,12 +1438,13 @@ label.field > span {
 
 /* ================= Приветственный экран ================= */
 
-/* Мягкие «дышащие» пятна на фоне онбординга */
-.center-wrap.ambient { position: relative; overflow: hidden; }
+/* Мягкие «дышащие» пятна на фоне онбординга.
+   ВАЖНО: position fixed (не absolute) и без overflow:hidden — иначе ломается прокрутка длинных шагов. */
+.center-wrap.ambient { position: relative; }
 .center-wrap.ambient::before,
 .center-wrap.ambient::after {
   content: '';
-  position: absolute;
+  position: fixed;
   width: 480px;
   height: 480px;
   border-radius: 50%;

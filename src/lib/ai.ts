@@ -5,6 +5,7 @@
 
 import type { AppConfig, Block, Lesson, StudyPlan, SubjectGoal, SubjectSchedule } from '../types'
 import { groqRaw, isTauri, uid, type GroqBody } from './api'
+import { activeKey } from './providers'
 import { SUBJECTS, subjectName, WEEKDAYS } from '../data/subjects'
 import { EGE_YEAR, egeSpec } from '../data/ege2027'
 
@@ -24,11 +25,11 @@ function isRateLimit(e: unknown): boolean {
   return m.includes('rate limit') || m.includes('429') || m.includes('too many') || m.includes('rate_limit')
 }
 
-async function groqRawRetry(apiKey: string, body: GroqBody): Promise<any> {
+async function groqRawRetry(cfg: AppConfig, body: GroqBody): Promise<any> {
   let last: unknown
   for (let i = 0; i < 3; i++) {
     try {
-      return await groqRaw(apiKey, body)
+      return await groqRaw(activeKey(cfg), body, cfg.provider ?? 'groq')
     } catch (e) {
       last = e
       if (isRateLimit(e) && i < 2) {
@@ -188,7 +189,7 @@ async function callJSON(cfg: AppConfig, opts: CallOpts): Promise<any> {
   let lastErr: unknown
   for (const body of attempts) {
     try {
-      const resp = await groqRawRetry(cfg.apiKey, body)
+      const resp = await groqRawRetry(cfg, body)
       const c: string = resp?.choices?.[0]?.message?.content ?? ''
       if (!c.trim()) {
         lastErr = new Error('Пустой ответ ИИ')
@@ -514,7 +515,7 @@ const EGE_FACTS = `
 /** Чат-репетитор. studentCtx — краткая справка об ученике (предметы, баллы, цели), чтобы отвечать точнее. */
 export async function tutorChat(cfg: AppConfig, messages: { role: string; content: string }[], studentCtx?: string): Promise<string> {
   if (useMock()) return 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
-  const resp = await groqRawRetry(cfg.apiKey, {
+  const resp = await groqRawRetry(cfg, {
     model: cfg.textModel,
     messages: [
       {

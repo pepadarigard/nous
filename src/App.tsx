@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useStore } from './store'
 import { checkApiKey } from './lib/api'
 import { modelScore, pickBestModel } from './lib/models'
+import { activeKey } from './lib/providers'
 import Layout from './ui/Layout'
 import Onboarding from './screens/Onboarding'
 import Home from './screens/Home'
@@ -26,10 +27,11 @@ export default function App() {
   useEffect(() => {
     if (!loaded) return
     const { config } = useStore.getState().data
-    if (!config.apiKey || config.modelAutoPicked) return
-    checkApiKey(config.apiKey).then((r) => {
+    const key = activeKey(config)
+    if (!key || config.modelAutoPicked) return
+    checkApiKey(key, config.provider ?? 'groq').then((r) => {
       if (!r.ok || !r.models?.length) return // сеть/ключ подведёт — попробуем при следующем запуске
-      const best = pickBestModel(r.models)
+      const best = pickBestModel(r.models, config.provider)
       const setConfig = useStore.getState().setConfig
       if (best && modelScore(best) > modelScore(config.textModel)) {
         setConfig({ textModel: best, modelAutoPicked: true })

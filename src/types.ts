@@ -58,8 +58,13 @@ export interface ProgressEvent {
   kind?: LessonKind // для честного XP по истории (переживает обновление плана)
 }
 
+export type Provider = 'groq' | 'openrouter' | 'cerebras'
+
 export interface AppConfig {
-  apiKey: string
+  apiKey: string // ключ Groq
+  apiKeyOr?: string // ключ OpenRouter (провайдер, работающий в РФ без VPN)
+  apiKeyCb?: string // ключ Cerebras (сверхбыстрый, щедрый бесплатный лимит)
+  provider?: Provider // активный провайдер ИИ (по умолчанию groq)
   textModel: string
   modelAutoPicked?: boolean // самая умная модель уже подобрана автоматически (чтобы не перевыбирать)
   showEstimate?: boolean // показывать приблизительный балл по прогрессу (по умолчанию да)
