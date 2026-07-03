@@ -32,6 +32,15 @@ export default function Chat() {
   const [thinking, setThinking] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Поле ввода растёт под текст (до ~5 строк), после отправки сжимается обратно.
+  function autoGrow() {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 132) + 'px'
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight)
@@ -63,6 +72,7 @@ export default function Chat() {
     const base: ChatMsg[] = [...msgs, { role: 'user', content: q }]
     setMsgs(base)
     setInput('')
+    requestAnimationFrame(autoGrow)
     setBusy(true)
     setThinking(true)
     let ans = ''
@@ -128,18 +138,19 @@ export default function Chat() {
         </div>
         <div className="row" style={{ marginTop: 12, gap: 8 }}>
           <textarea
+            ref={inputRef}
             className="input"
             rows={1}
             placeholder="Напиши вопрос…"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => { setInput(e.target.value); autoGrow() }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 send()
               }
             }}
-            style={{ resize: 'none' }}
+            style={{ resize: 'none', overflowY: 'auto' }}
           />
           <button className="btn btn-primary" onClick={send} disabled={!input.trim() || busy} aria-label="Отправить">
             <Send size={16} />

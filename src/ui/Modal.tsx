@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 
 export default function Modal({
@@ -12,6 +12,15 @@ export default function Modal({
   children: ReactNode
   wide?: boolean
 }) {
+  // Escape закрывает окно — привычно и удобно.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+
   return (
     <div className="modal-bg" onClick={onClose}>
       <div
@@ -22,7 +31,7 @@ export default function Modal({
         <div className="row" style={{ marginBottom: 16 }}>
           <h2 style={{ margin: 0, fontSize: 20 }}>{title}</h2>
           <div className="spacer" />
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Закрыть">
             <X size={16} />
           </button>
         </div>

@@ -3,7 +3,7 @@ import { subjectById } from '../data/subjects'
 import type { Block, StudyPlan } from '../types'
 import { computeStats, motivate } from '../lib/stats'
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
-import { Flame, CheckCircle2, Trophy, CalendarCheck, Info } from 'lucide-react'
+import { Flame, CalendarCheck, Target, Info } from 'lucide-react'
 
 function fmtDay(iso: string) {
   const d = new Date(iso)
@@ -26,6 +26,32 @@ function completionBySubject(plan?: StudyPlan): Record<string, { done: number; t
 const axis = { stroke: '#9aa1ad', fontSize: 12 }
 const tip = { background: '#fff', border: '1px solid #e7e9ee', borderRadius: 10, color: '#1b1e26' }
 const WD = ['Пн', '', 'Ср', '', 'Пт', '', '']
+
+/** Кольцо прогресса уровня: заполнение = доля XP внутри текущего уровня. */
+function LevelRing({ level, pct }: { level: number; pct: number }) {
+  const R = 54
+  const C = 2 * Math.PI * R
+  const filled = Math.max(0.02, pct / 100) * C
+  return (
+    <svg className="lvl-ring" viewBox="0 0 130 130" width="132" height="132">
+      <defs>
+        <linearGradient id="ringG" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#2dd4bf" />
+          <stop offset="100%" stopColor="#0d9488" />
+        </linearGradient>
+      </defs>
+      <circle cx="65" cy="65" r={R} fill="none" stroke="#e8f4f2" strokeWidth="11" />
+      <circle
+        cx="65" cy="65" r={R} fill="none"
+        stroke="url(#ringG)" strokeWidth="11" strokeLinecap="round"
+        strokeDasharray={`${filled} ${C - filled}`}
+        transform="rotate(-90 65 65)"
+      />
+      <text x="65" y="60" textAnchor="middle" className="ring-num">{level}</text>
+      <text x="65" y="82" textAnchor="middle" className="ring-cap">уровень</text>
+    </svg>
+  )
+}
 
 export default function ProgressScreen() {
   const data = useStore((s) => s.data)
@@ -56,105 +82,97 @@ export default function ProgressScreen() {
     <div className="fade-in">
       <div className="page-head">
         <h1>Твой прогресс 📈</h1>
-        <p>Каждое отмеченное занятие — это XP, серия и шаг к цели. Смотри, как ты растёшь.</p>
+        <p>{mo.emoji} {mo.title} {mo.sub}</p>
       </div>
 
-      {/* Мотивация */}
-      <div className="motiv">
-        <div className="motiv-emoji">{mo.emoji}</div>
-        <div>
-          <div className="motiv-title">{mo.title}</div>
-          <div className="motiv-sub">{mo.sub}</div>
+      {/* Hero: уровень с кольцом + ключевые метрики */}
+      <div className="card level-hero">
+        <LevelRing level={st.level.level} pct={st.level.pct} />
+        <div className="lh-mid">
+          <div className="lh-kicker">Уровень {st.level.level}</div>
+          <div className="lh-title">{st.level.title}</div>
+          <div className="lh-xp">{st.xp} XP · до следующего уровня ещё <b>{st.level.toNext} XP</b></div>
+          <div className="pbar" style={{ marginTop: 10, maxWidth: 340 }}><span style={{ width: `${st.level.pct}%` }} /></div>
         </div>
-      </div>
-
-      {/* Уровень · Серия · Неделя · Готовность */}
-      <div className="grid cols-4" style={{ margin: '16px 0 22px' }}>
-        <div className="stat level-card">
-          <div className="row" style={{ gap: 8, color: 'var(--accent)' }}><Trophy size={17} /><span className="lbl" style={{ margin: 0 }}>Уровень {st.level.level}</span></div>
-          <div className="val" style={{ fontSize: 22 }}>{st.level.title}</div>
-          <div className="pbar" style={{ marginTop: 10 }}><span style={{ width: `${st.level.pct}%` }} /></div>
-          <div className="small muted" style={{ marginTop: 6 }}>{st.xp} XP · до {st.level.level + 1} ур. ещё {st.level.toNext}</div>
-        </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 8, color: 'var(--warn)' }}><Flame size={17} /><span className="lbl" style={{ margin: 0 }}>Серия дней</span></div>
-          <div className="val">{st.streak} 🔥</div>
-          <div className="small muted" style={{ marginTop: 6 }}>Рекорд: {st.best} дн.</div>
-        </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 8, color: 'var(--accent)' }}><CalendarCheck size={17} /><span className="lbl" style={{ margin: 0 }}>За 7 дней</span></div>
-          <div className="val">{st.thisWeek}<span style={{ fontSize: 16, color: 'var(--muted)' }}> зан.</span></div>
-          <div className="small" style={{ marginTop: 6, color: st.weekDelta >= 0 ? 'var(--success)' : 'var(--muted)' }}>
-            {st.weekDelta >= 0 ? `+${st.weekDelta}` : st.weekDelta} к прошлой неделе
+        <div className="lh-side">
+          <div className="lh-metric">
+            <div className="lh-m-ic" style={{ color: 'var(--warn)' }}><Flame size={16} /></div>
+            <div><b>{st.streak}</b> дн. подряд<div className="small muted">рекорд {st.best}</div></div>
+          </div>
+          <div className="lh-metric">
+            <div className="lh-m-ic" style={{ color: 'var(--accent)' }}><CalendarCheck size={16} /></div>
+            <div><b>{st.thisWeek}</b> за 7 дней<div className="small" style={{ color: st.weekDelta >= 0 ? 'var(--success)' : 'var(--muted)' }}>{st.weekDelta >= 0 ? `+${st.weekDelta}` : st.weekDelta} к прошлой</div></div>
+          </div>
+          <div className="lh-metric">
+            <div className="lh-m-ic" style={{ color: 'var(--accent)' }}><Target size={16} /></div>
+            <div><b>{st.overallPct}%</b> плана<div className="small muted">{st.doneCount} из {st.totalCount}</div></div>
           </div>
         </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 8, color: 'var(--accent)' }}><CheckCircle2 size={17} /><span className="lbl" style={{ margin: 0 }}>Общая готовность</span></div>
-          <div className="val">{st.overallPct}%</div>
-          <div className="small muted" style={{ marginTop: 6 }}>{st.doneCount} из {st.totalCount} занятий</div>
-        </div>
       </div>
 
-      {/* Тепловая карта активности */}
-      <div className="card" style={{ marginBottom: 22 }}>
-        <div className="row" style={{ marginBottom: 14 }}>
-          <h3 style={{ margin: 0 }}>Твоя активность</h3>
-          <div className="spacer" />
-          <span className="small muted">последние 13 недель</span>
-        </div>
-        <div className="heat-wrap">
-          <div className="heat-days">
-            {WD.map((w, i) => <div key={i} className="heat-day-lbl">{w}</div>)}
+      {/* Активность + кривая роста */}
+      <div className="grid cols-2" style={{ margin: '16px 0 22px', alignItems: 'stretch' }}>
+        <div className="card">
+          <div className="row" style={{ marginBottom: 14 }}>
+            <h3 style={{ margin: 0 }}>Твоя активность</h3>
+            <div className="spacer" />
+            <span className="small muted">13 недель</span>
           </div>
-          <div className="heat">
-            {st.heat.map((col, ci) => (
-              <div className="heat-col" key={ci}>
-                {col.map((d, di) => (
-                  <div key={di} className={`heat-cell l${d.lvl}${d.future ? ' fut' : ''}`} title={`${d.date}: ${d.count} зан.`} />
-                ))}
-              </div>
-            ))}
+          <div className="heat-wrap">
+            <div className="heat-days">
+              {WD.map((w, i) => <div key={i} className="heat-day-lbl">{w}</div>)}
+            </div>
+            <div className="heat">
+              {st.heat.map((col, ci) => (
+                <div className="heat-col" key={ci}>
+                  {col.map((d, di) => (
+                    <div key={di} className={`heat-cell l${d.lvl}${d.future ? ' fut' : ''}`} title={`${d.date}: ${d.count} зан.`} />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="heat-legend">
+            <span className="small muted">меньше</span>
+            <i className="heat-cell l0" /><i className="heat-cell l1" /><i className="heat-cell l2" /><i className="heat-cell l3" /><i className="heat-cell l4" />
+            <span className="small muted">больше</span>
           </div>
         </div>
-        <div className="heat-legend">
-          <span className="small muted">меньше</span>
-          <i className="heat-cell l0" /><i className="heat-cell l1" /><i className="heat-cell l2" /><i className="heat-cell l3" /><i className="heat-cell l4" />
-          <span className="small muted">больше</span>
-        </div>
-      </div>
 
-      {/* Кривая роста */}
-      {cumSeries.length > 0 && (
-        <div className="card" style={{ marginBottom: 22 }}>
+        <div className="card">
           <h3>Пройдено занятий (всего)</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={cumSeries} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#0d9488" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#0d9488" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eceef2" />
-              <XAxis dataKey="date" {...axis} />
-              <YAxis {...axis} />
-              <Tooltip contentStyle={tip} />
-              <Area type="monotone" dataKey="count" stroke="#0d9488" strokeWidth={2.5} fill="url(#g1)" />
-            </AreaChart>
-          </ResponsiveContainer>
+          {cumSeries.length === 0 ? (
+            <div className="empty" style={{ padding: '34px 10px' }}><div className="big">🌱</div><p>Отметь первое занятие — график начнёт расти.</p></div>
+          ) : (
+            <ResponsiveContainer width="100%" height={205}>
+              <AreaChart data={cumSeries} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#0d9488" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#0d9488" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#eceef2" />
+                <XAxis dataKey="date" {...axis} />
+                <YAxis {...axis} allowDecimals={false} />
+                <Tooltip contentStyle={tip} />
+                <Area type="monotone" dataKey="count" stroke="#0d9488" strokeWidth={2.5} fill="url(#g1)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Достижения */}
       <div className="card" style={{ marginBottom: 22 }}>
         <div className="row" style={{ marginBottom: 14 }}>
           <h3 style={{ margin: 0 }}>Достижения</h3>
           <div className="spacer" />
-          <span className="small muted">{st.unlockedCount} / {st.achievements.length}</span>
+          <span className="chip">{st.unlockedCount} / {st.achievements.length}</span>
         </div>
         <div className="ach-grid">
           {st.achievements.map((a) => (
-            <div className={'ach' + (a.unlocked ? ' on' : '')} key={a.id}>
+            <div className={'ach' + (a.unlocked ? ' on' : '')} key={a.id} title={a.desc}>
               <div className="ach-ic">{a.unlocked ? a.icon : '🔒'}</div>
               <div className="ach-tx">
                 <b>{a.title}</b>

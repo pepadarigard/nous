@@ -89,6 +89,43 @@ async fn groq_models(api_key: String) -> Result<String, String> {
     resp.text().await.map_err(|e| e.to_string())
 }
 
+/// Последний релиз репозитория на GitHub (для проверки обновлений).
+#[tauri::command]
+async fn github_latest(repo: String) -> Result<String, String> {
+    let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let resp = http()
+        .get(&url)
+        .header("User-Agent", "nous-app")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    resp.text().await.map_err(|e| e.to_string())
+}
+
+/// Экспорт данных: пишет JSON-бэкап в папку «Загрузки», возвращает полный путь.
+#[tauri::command]
+fn export_state(app: tauri::AppHandle, data: String, file_name: String) -> Result<String, String> {
+    let safe: String = file_name
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .collect();
+    let dir = app.path().download_dir().map_err(|e| e.to_string())?;
+    let path = dir.join(safe);
+    fs::write(&path, data).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Показать файл в Проводнике (выделив его).
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    std::process::Command::new("explorer")
+        .arg(format!("/select,{}", path))
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -107,7 +144,10 @@ pub fn run() {
             load_state,
             save_state,
             groq_request,
-            groq_models
+            groq_models,
+            github_latest,
+            export_state,
+            reveal_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
