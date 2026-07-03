@@ -1,8 +1,21 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { buildPlanPrompt, importPlan } from '../lib/ai'
-import { Copy, ArrowRight, ExternalLink } from 'lucide-react'
+import { subjectById } from '../data/subjects'
+import type { Block } from '../types'
+import { Copy, ArrowRight, ExternalLink, PartyPopper } from 'lucide-react'
 import { humanError, openExternal } from '../lib/api'
+
+// Сводка по разложенному плану: сколько занятий и до какой даты его хватит по расписанию.
+interface SummaryRow {
+  subjectId: string
+  total: number
+  theory: number
+  practice: number
+  review: number
+  endsText: string
+  note?: string
+}
 
 // Получить/обновить план от внешнего ИИ: промт → копировать → вставить ответ → разложить.
 export default function PlanImporter({ onDone }: { onDone: () => void }) {
@@ -11,6 +24,34 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [summary, setSummary] = useState<SummaryRow[] | null>(null)
+
+  function buildSummary(blocks: Block[]): SummaryRow[] {
+    const bySub: Record<string, { total: number; theory: number; practice: number; review: number }> = {}
+    for (const b of blocks) {
+      const a = (bySub[b.subjectId] ||= { total: 0, theory: 0, practice: 0, review: 0 })
+      for (const l of b.lessons) {
+        a.total++
+        a[l.kind]++
+      }
+    }
+    const exam = store.data.examDate ? new Date(store.data.examDate) : null
+    return Object.entries(bySub).map(([sid, c]) => {
+      const sch = store.data.schedules.find((s) => s.subjectId === sid)
+      const perWeek = sch?.days?.length || 5
+      const weeks = Math.ceil(c.total / perWeek)
+      const end = new Date()
+      end.setDate(end.getDate() + weeks * 7)
+      const endsText = end.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+      let note: string | undefined
+      if (exam) {
+        const gapDays = Math.round((exam.getTime() - end.getTime()) / 86400000)
+        if (gapDays > 42) note = 'закончится сильно раньше экзамена — потом просто нажмёшь «Дописать план»'
+        else if (gapDays < -7) note = 'занятий больше, чем влезает до экзамена — темп будет плотный'
+      }
+      return { subjectId: sid, ...c, endsText, note }
+    })
+  }
 
   const prompt = buildPlanPrompt({
     subjects: store.data.subjects,
@@ -56,7 +97,7 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
       store.ensureSubjectSetup(subs) // новым предметам — дефолтные цель и расписание
       store.setPlan({ createdAt: new Date().toISOString(), examDate: store.data.examDate, overview: res.overview, blocks: res.blocks })
       setBusy('')
-      onDone()
+      setSummary(buildSummary(res.blocks)) // показываем сводку вместо мгновенного закрытия
     } catch (e) {
       setError('Ошибка: ' + humanError(e))
       setBusy('')
@@ -66,6 +107,44 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
   const chip = (n: string) => (
     <span className="chip" style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)', borderColor: 'transparent' }}>{n}</span>
   )
+
+  // Экран-сводка после успешной раскладки
+  if (summary) {
+    return (
+      <div className="fade-in">
+        <div className="row" style={{ gap: 10, marginBottom: 6 }}>
+          <PartyPopper size={22} color="var(--accent)" />
+          <h3 style={{ margin: 0 }}>План разложен по календарю!</h3>
+        </div>
+        <p className="muted small" style={{ marginTop: 4 }}>Вот что получилось. Оценки «до какой даты хватит» — по твоему расписанию занятий.</p>
+        {summary.map((r) => {
+          const s = subjectById(r.subjectId)
+          return (
+            <div className="card soft" key={r.subjectId} style={{ marginBottom: 10, padding: 14 }}>
+              <div className="row" style={{ gap: 10 }}>
+                <span style={{ fontSize: 20 }}>{s?.emoji || '📘'}</span>
+                <b>{s?.short || r.subjectId}</b>
+                <div className="spacer" />
+                <span className="chip">{r.total} занятий</span>
+              </div>
+              <div className="row wrap small muted" style={{ marginTop: 8, gap: 12 }}>
+                <span>📖 теория: {r.theory}</span>
+                <span>✏️ практика: {r.practice}</span>
+                <span>🔁 повторение: {r.review}</span>
+                <div className="spacer" />
+                <span>хватит примерно до <b style={{ color: 'var(--text)' }}>{r.endsText}</b></span>
+              </div>
+              {r.note && <p className="small" style={{ margin: '8px 0 0', color: 'var(--warn)' }}>💡 {r.note}</p>}
+            </div>
+          )
+        })}
+        <div className="row" style={{ marginTop: 16 }}>
+          <div className="spacer" />
+          <button className="btn btn-primary btn-lg" onClick={onDone}>Отлично, поехали 🚀</button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>

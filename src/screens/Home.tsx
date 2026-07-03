@@ -63,10 +63,13 @@ export default function Home() {
   if (data.examDate) daysLeft = Math.ceil((new Date(data.examDate).getTime() - Date.now()) / 86400000)
 
   const agenda = agendaByDate(plan, data.schedules)
-  const today: AgendaItem[] = agenda[iso(new Date())] || []
+  const todayISO = iso(new Date())
+  const today: AgendaItem[] = agenda[todayISO] || []
   const tmr = new Date()
   tmr.setDate(tmr.getDate() + 1)
   const tomorrow: AgendaItem[] = agenda[iso(tmr)] || []
+  // Будущих занятий не осталось — план кончился, пора дописать или обновить.
+  const planEnded = !Object.keys(agenda).some((k) => k >= todayISO && agenda[k].length > 0)
 
   const review = allPairs.filter((x) => x.lesson.kind === 'review' && !x.lesson.done).slice(0, 5)
   const recent = allPairs
@@ -80,6 +83,16 @@ export default function Home() {
         <h1>Привет{data.studentName ? `, ${data.studentName}` : ''}! 👋</h1>
         <p>{plan.overview}</p>
       </div>
+
+      {planEnded && (
+        <div className="info-banner" style={{ marginBottom: 18 }}>
+          <span style={{ fontSize: 18 }}>🏁</span>
+          <div className="small" style={{ flex: 1 }}>
+            <b>Занятия по плану закончились.</b> Самое время дописать план (новые темы или больше практики) или собрать новый.
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={() => nav('/plan')}>К плану</button>
+        </div>
+      )}
 
       <div className="grid cols-4" style={{ marginBottom: 22 }}>
         <div className="stat">
