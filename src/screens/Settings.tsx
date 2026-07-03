@@ -22,6 +22,7 @@ export default function Settings() {
     groq: data.config.apiKey,
     openrouter: data.config.apiKeyOr || '',
     cerebras: data.config.apiKeyCb || '',
+    gigachat: data.config.apiKeyGc || '',
   })
   const apiKey = keys[prov]
   const setApiKey = (v: string) => setKeys((k) => ({ ...k, [prov]: v }))
@@ -90,7 +91,12 @@ export default function Settings() {
   // забыть нажать «Сохранить» больше нельзя.
   const keySaveTimer = useRef<number | null>(null)
   function saveKeyFor(p: Provider, v: string) {
-    setConfig(p === 'openrouter' ? { apiKeyOr: v } : p === 'cerebras' ? { apiKeyCb: v } : { apiKey: v })
+    setConfig(
+      p === 'openrouter' ? { apiKeyOr: v }
+      : p === 'cerebras' ? { apiKeyCb: v }
+      : p === 'gigachat' ? { apiKeyGc: v }
+      : { apiKey: v },
+    )
   }
   function onKeyInput(v: string) {
     setApiKey(v)
@@ -106,7 +112,7 @@ export default function Settings() {
   const smarter = best && modelScore(best) > modelScore(textModel) ? best : null
 
   function save() {
-    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, textModel })
+    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, apiKeyGc: keys.gigachat, textModel })
     setSaved(true)
     setTimeout(() => setSaved(false), 1600)
   }
@@ -122,7 +128,7 @@ export default function Settings() {
   function useSmartest() {
     if (!smarter) return
     setTextModel(smarter)
-    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, textModel: smarter, modelAutoPicked: true })
+    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, apiKeyGc: keys.gigachat, textModel: smarter, modelAutoPicked: true })
   }
 
   async function doExport() {
@@ -202,8 +208,11 @@ export default function Settings() {
           <span>Провайдер</span>
         </label>
         <div className="seg" style={{ marginBottom: 6 }}>
+          <button className={'seg-btn' + (prov === 'gigachat' ? ' on' : '')} onClick={() => switchProv('gigachat')}>
+            🛡 GigaChat
+          </button>
           <button className={'seg-btn' + (prov === 'openrouter' ? ' on' : '')} onClick={() => switchProv('openrouter')}>
-            🇷🇺 OpenRouter
+            🌍 OpenRouter
           </button>
           <button className={'seg-btn' + (prov === 'cerebras' ? ' on' : '')} onClick={() => switchProv('cerebras')}>
             🚀 Cerebras
@@ -218,7 +227,7 @@ export default function Settings() {
         </p>
         <label className="field">
           <span>API-ключ {pInfo.name}</span>
-          <input className="input" type="password" value={apiKey} onChange={(e) => onKeyInput(e.target.value)} onBlur={saveKeyNow} placeholder={pInfo.keyPrefix + '...'} />
+          <input className="input" type="password" value={apiKey} onChange={(e) => onKeyInput(e.target.value)} onBlur={saveKeyNow} placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'ключ авторизации (Authorization Key)'} />
         </label>
         <label className="field">
           <span>Модель</span>

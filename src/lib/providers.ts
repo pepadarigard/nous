@@ -41,6 +41,15 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     hint: 'сверхбыстрый; щедрый бесплатный лимит',
     defaultModel: 'gpt-oss-120b',
   },
+  gigachat: {
+    id: 'gigachat',
+    name: 'GigaChat',
+    base: 'https://gigachat.devices.sberbank.ru/api/v1', // фактические запросы идут через Rust (OAuth + сертификаты Минцифры)
+    keysUrl: 'https://developers.sber.ru/studio',
+    keyPrefix: '',
+    hint: 'Сбер — гарантированно работает в России, отличный русский',
+    defaultModel: 'GigaChat',
+  },
 }
 
 // Запасные бесплатные модели OpenRouter: если выбранная перегружена (429 upstream),
@@ -62,5 +71,6 @@ export function providerOf(cfg: AppConfig): ProviderInfo {
 export function activeKey(cfg: AppConfig): string {
   if (cfg.provider === 'openrouter') return cfg.apiKeyOr || ''
   if (cfg.provider === 'cerebras') return cfg.apiKeyCb || ''
+  if (cfg.provider === 'gigachat') return cfg.apiKeyGc || ''
   return cfg.apiKey
 }

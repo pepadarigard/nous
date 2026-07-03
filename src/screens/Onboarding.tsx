@@ -24,6 +24,7 @@ export default function Onboarding() {
     groq: store.data.config.apiKey || '',
     openrouter: store.data.config.apiKeyOr || '',
     cerebras: store.data.config.apiKeyCb || '',
+    gigachat: store.data.config.apiKeyGc || '',
   })
   const apiKey = keys[prov]
   const pInfo = PROVIDERS[prov]
@@ -97,7 +98,7 @@ export default function Onboarding() {
       }
     }
     if (!model) model = pInfo.defaultModel // сеть подвела — надёжный дефолт провайдера
-    store.setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, textModel: model, modelAutoPicked: true })
+    store.setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, apiKeyGc: keys.gigachat, textModel: model, modelAutoPicked: true })
     setStep('subjects')
   }
   function saveSubjectsAndNext() {
@@ -193,6 +194,14 @@ export default function Onboarding() {
                 </div>
                 <div className="check">{prov === 'cerebras' && <Check size={14} />}</div>
               </div>
+              <div className={'subject-card' + (prov === 'gigachat' ? ' sel' : '')} onClick={() => { setProv('gigachat'); setCheckMsg(null) }}>
+                <span className="emoji">🛡</span>
+                <div>
+                  <div style={{ fontWeight: 700 }}>GigaChat (Сбер)</div>
+                  <div className="small muted">гарантированно в России · отличный русский</div>
+                </div>
+                <div className="check">{prov === 'gigachat' && <Check size={14} />}</div>
+              </div>
               <div className={'subject-card' + (prov === 'groq' ? ' sel' : '')} onClick={() => { setProv('groq'); setCheckMsg(null) }}>
                 <span className="emoji">⚡</span>
                 <div>
@@ -207,11 +216,19 @@ export default function Onboarding() {
               <a href={pInfo.keysUrl} onClick={(e) => { e.preventDefault(); openExternal(pInfo.keysUrl) }}>
                 {pInfo.keysUrl.replace('https://', '')}
               </a>{' '}
-              (регистрация → Create API Key → скопируй ключ)
+              {prov === 'gigachat'
+                ? '(вход по Сбер ID → создай проект GigaChat API → скопируй «Ключ авторизации»)'
+                : '(регистрация → Create API Key → скопируй ключ)'}
             </p>
             <label className="field">
               <span><KeyRound size={13} style={{ verticalAlign: -2, marginRight: 5 }} />API-ключ {pInfo.name}</span>
-              <input className="input" type="password" placeholder={pInfo.keyPrefix + '...'} value={apiKey} onChange={(e) => { setApiKey(e.target.value); setCheckMsg(null) }} />
+              <input
+                className="input"
+                type="password"
+                placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'ключ авторизации (Authorization Key)'}
+                value={apiKey}
+                onChange={(e) => { setApiKey(e.target.value); setCheckMsg(null) }}
+              />
             </label>
             <p className="small muted" style={{ marginTop: 0 }}>
               🧠 Модель ИИ подберём автоматически — самую умную из доступных (сменить можно в Настройках).

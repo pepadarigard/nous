@@ -58,12 +58,13 @@ export interface ProgressEvent {
   kind?: LessonKind // для честного XP по истории (переживает обновление плана)
 }
 
-export type Provider = 'groq' | 'openrouter' | 'cerebras'
+export type Provider = 'groq' | 'openrouter' | 'cerebras' | 'gigachat'
 
 export interface AppConfig {
   apiKey: string // ключ Groq
   apiKeyOr?: string // ключ OpenRouter (провайдер, работающий в РФ без VPN)
   apiKeyCb?: string // ключ Cerebras (сверхбыстрый, щедрый бесплатный лимит)
+  apiKeyGc?: string // ключ авторизации GigaChat (Сбер — гарантированно работает в РФ)
   provider?: Provider // активный провайдер ИИ (по умолчанию groq)
   textModel: string
   modelAutoPicked?: boolean // самая умная модель уже подобрана автоматически (чтобы не перевыбирать)

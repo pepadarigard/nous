@@ -60,13 +60,20 @@ export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider
   if (provider === 'openrouter') {
     // Бесплатные модели часто перегружены (429 upstream) — даём OpenRouter цепочку запасных,
     // он сам переключится. Формат: массив `models` ВМЕСТО одиночного `model`.
-    const chain = [body.model, ...OR_FALLBACK_MODELS.filter((m) => m !== body.model)]
+    // ВАЖНО: OpenRouter принимает МАКСИМУМ 3 модели в массиве (больше → ошибка 400).
+    const chain = [body.model, ...OR_FALLBACK_MODELS.filter((m) => m !== body.model)].slice(0, 3)
     payload.models = chain
     delete payload.model
   }
+  if (provider === 'gigachat') {
+    delete payload.response_format // GigaChat может не знать этот параметр; JSON парсим из текста
+  }
   const bodyStr = JSON.stringify(payload)
   let text: string
-  if (isTauri) {
+  if (provider === 'gigachat') {
+    if (!isTauri) throw new Error('GigaChat работает только в приложении (не в браузере)')
+    text = await invoke<string>('giga_request', { authKey: apiKey, body: bodyStr })
+  } else if (isTauri) {
     text = await invoke<string>('llm_request', { apiKey, body: bodyStr, base: p.base })
   } else {
     const res = await fetch(`${p.base}/chat/completions`, {
@@ -113,6 +120,13 @@ async function authGet(apiKey: string, url: string): Promise<any> {
 export async function checkApiKey(apiKey: string, provider: Provider = 'groq'): Promise<{ ok: boolean; error?: string; models?: string[] }> {
   const p = PROVIDERS[provider]
   try {
+    if (provider === 'gigachat') {
+      if (!isTauri) return { ok: false, error: 'GigaChat работает только в приложении (не в браузере)' }
+      const text = await invoke<string>('giga_get', { authKey: apiKey, path: '/models' })
+      const parsed = JSON.parse(text)
+      if (parsed?.message && !parsed?.data) return { ok: false, error: parsed.message }
+      return { ok: true, models: (parsed.data || []).map((m: any) => m.id) }
+    }
     if (provider === 'openrouter') {
       // /models у OpenRouter публичный (список вернём в любом случае), а ключ проверяем отдельным эндпоинтом.
       const models = await authGet(apiKey, `${p.base}/models`)
