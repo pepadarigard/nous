@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { SUBJECTS, WEEKDAYS, subjectName } from '../data/subjects'
 import { checkApiKey, humanError, isTauri, openExternal } from '../lib/api'
+import { modelLabel, modelScore, pickBestModel } from '../lib/models'
 import PlanImporter from './PlanImporter'
 import { Check, KeyRound, ArrowRight, ArrowLeft, Target, Sparkles } from 'lucide-react'
 
@@ -38,7 +39,15 @@ export default function Onboarding() {
     setCheckMsg(null)
     const r = await checkApiKey(apiKey)
     setChecking(false)
-    setCheckMsg(r.ok ? { ok: true, text: `Ключ рабочий! Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: humanError(r.error || 'Ключ не подошёл') })
+    if (r.ok) {
+      // Сразу подбираем самую умную модель из доступных на этом ключе.
+      const best = r.models?.length ? pickBestModel(r.models) : null
+      if (best && modelScore(best) > modelScore(textModel)) setTextModel(best)
+      const label = best ? modelLabel(best).label : null
+      setCheckMsg({ ok: true, text: `Ключ рабочий!${label ? ` Модель: ${label} (самая умная из доступных)` : ''}` })
+    } else {
+      setCheckMsg({ ok: false, text: humanError(r.error || 'Ключ не подошёл') })
+    }
   }
   function toggleSubject(id: string) {
     setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
@@ -62,8 +71,19 @@ export default function Onboarding() {
     return Math.max(0, Math.min(100, Number(v)))
   }
 
-  function saveSetupAndNext() {
-    store.setConfig({ apiKey, textModel })
+  async function saveSetupAndNext() {
+    let model = textModel
+    // Если ключ не проверяли кнопкой — тихо подбираем лучшую модель прямо сейчас.
+    if (!checkMsg?.ok) {
+      try {
+        const r = await checkApiKey(apiKey)
+        const best = r.ok && r.models?.length ? pickBestModel(r.models) : null
+        if (best && modelScore(best) > modelScore(model)) model = best
+      } catch {
+        /* остаёмся на дефолте */
+      }
+    }
+    store.setConfig({ apiKey, textModel: model, modelAutoPicked: true })
     setStep('subjects')
   }
   function saveSubjectsAndNext() {
@@ -113,13 +133,9 @@ export default function Onboarding() {
               <span><KeyRound size={13} style={{ verticalAlign: -2, marginRight: 5 }} />API-ключ Groq</span>
               <input className="input" type="password" placeholder="gsk_..." value={apiKey} onChange={(e) => { setApiKey(e.target.value); setCheckMsg(null) }} />
             </label>
-            <label className="field">
-              <span>Модель ИИ</span>
-              <select className="select" value={textModel} onChange={(e) => setTextModel(e.target.value)}>
-                <option value="qwen/qwen3-32b">Qwen3 32B — умная и надёжная (рекомендуется)</option>
-                <option value="qwen/qwen3.6-27b">Qwen3.6 27B — новее, быстрее</option>
-              </select>
-            </label>
+            <p className="small muted" style={{ marginTop: 0 }}>
+              🧠 Модель ИИ подберём автоматически — самую умную из доступных на твоём ключе (сменить можно в Настройках).
+            </p>
             <div className="row" style={{ marginTop: 8 }}>
               <button className="btn btn-ghost" onClick={doCheck} disabled={!apiKey || checking}>{checking ? 'Проверяю…' : 'Проверить ключ'}</button>
               {checkMsg && <span className="small" style={{ color: checkMsg.ok ? 'var(--success)' : 'var(--danger)' }}>{checkMsg.ok ? '✓ ' : '✕ '}{checkMsg.text}</span>}

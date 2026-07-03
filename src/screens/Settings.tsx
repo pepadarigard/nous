@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { checkApiKey, humanError, isTauri, openExternal, saveState } from '../lib/api'
+import { chatModels, modelLabel, modelScore, pickBestModel } from '../lib/models'
 import { appVersion, checkUpdate, GITHUB_URL, type UpdateInfo } from '../lib/update'
 import { subjectName } from '../data/subjects'
 import type { AppData } from '../types'
@@ -36,9 +37,21 @@ export default function Settings() {
   const [updBusy, setUpdBusy] = useState(false)
   const [updMsg, setUpdMsg] = useState<{ info?: UpdateInfo; error?: string } | null>(null)
 
+  // Модели, реально доступные на ключе (подгружаются с Groq)
+  const [available, setAvailable] = useState<string[] | null>(null)
+
   useEffect(() => {
     appVersion().then(setVersion)
+    if (data.config.apiKey) {
+      checkApiKey(data.config.apiKey).then((r) => {
+        if (r.ok && r.models?.length) setAvailable(r.models)
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const best = available ? pickBestModel(available) : null
+  const smarter = best && modelScore(best) > modelScore(textModel) ? best : null
 
   function save() {
     setConfig({ apiKey, textModel })
@@ -51,6 +64,13 @@ export default function Settings() {
     const r = await checkApiKey(apiKey)
     setChecking(false)
     setCheckMsg(r.ok ? { ok: true, text: `Рабочий. Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: humanError(r.error || 'Ошибка') })
+    if (r.ok && r.models?.length) setAvailable(r.models)
+  }
+
+  function useSmartest() {
+    if (!smarter) return
+    setTextModel(smarter)
+    setConfig({ textModel: smarter, modelAutoPicked: true })
   }
 
   async function doExport() {
@@ -133,10 +153,31 @@ export default function Settings() {
         <label className="field">
           <span>Модель</span>
           <select className="select" value={textModel} onChange={(e) => setTextModel(e.target.value)}>
-            <option value="qwen/qwen3-32b">Qwen3 32B — умная и надёжная (рекомендуется)</option>
-            <option value="qwen/qwen3.6-27b">Qwen3.6 27B — новее, быстрее</option>
+            {(() => {
+              // Реальный список с ключа (по уму), иначе — текущая модель как есть.
+              const ids = available ? chatModels(available).sort((a, b) => modelScore(b) - modelScore(a)) : []
+              if (!ids.includes(textModel)) ids.unshift(textModel)
+              return ids.map((id) => {
+                const m = modelLabel(id)
+                const isBest = id === best
+                return (
+                  <option key={id} value={id}>
+                    {m.label !== id ? `${m.label} — ${m.hint}` : id}{isBest ? ' ⭐ (самая умная)' : ''}
+                  </option>
+                )
+              })
+            })()}
           </select>
         </label>
+        {smarter && (
+          <div className="info-banner" style={{ marginBottom: 12 }}>
+            <span style={{ fontSize: 16 }}>🧠</span>
+            <div className="small" style={{ flex: 1 }}>
+              На твоём ключе доступна модель поумнее: <b>{modelLabel(smarter).label}</b> ({modelLabel(smarter).hint}). Ответы в чате станут заметно точнее.
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={useSmartest}>Переключить</button>
+          </div>
+        )}
         <div className="row">
           <button className="btn btn-primary" onClick={save}>{saved ? 'Сохранено ✓' : 'Сохранить'}</button>
           <button className="btn btn-ghost" onClick={check} disabled={!apiKey || checking}>{checking ? 'Проверяю…' : 'Проверить ключ'}</button>

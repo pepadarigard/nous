@@ -61,6 +61,7 @@ export interface ProgressEvent {
 export interface AppConfig {
   apiKey: string
   textModel: string
+  modelAutoPicked?: boolean // самая умная модель уже подобрана автоматически (чтобы не перевыбирать)
   showEstimate?: boolean // показывать приблизительный балл по прогрессу (по умолчанию да)
   soundOn?: boolean // звук при новом уровне/достижении (по умолчанию да)
 }
