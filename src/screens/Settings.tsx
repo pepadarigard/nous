@@ -61,13 +61,15 @@ export default function Settings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Смена провайдера: перечитываем его модели и СРАЗУ ставим самую сильную из бесплатных.
+  // Смена провайдера ПРИМЕНЯЕТСЯ СРАЗУ (без кнопки «Сохранить»): конфиг + самая сильная модель.
   function switchProv(p: Provider) {
     if (p === prov) return
     setProv(p)
     setAvailable(null)
     setCheckMsg(null)
-    setTextModel(PROVIDERS[p].defaultModel) // модель прошлого провайдера здесь не работает
+    const def = PROVIDERS[p].defaultModel
+    setTextModel(def) // модель прошлого провайдера здесь не работает
+    setConfig({ provider: p, textModel: def })
     const k = keys[p]
     if (k || p === 'openrouter') {
       // у OpenRouter список моделей публичный — подтянем даже без ключа
@@ -75,10 +77,29 @@ export default function Settings() {
         if (r.models?.length) {
           setAvailable(r.models)
           const best = pickBestModel(r.models, p)
-          if (best) setTextModel(best)
+          if (best) {
+            setTextModel(best)
+            setConfig({ textModel: best })
+          }
         }
       })
     }
+  }
+
+  // Ключ сохраняется сам: при уходе из поля и с задержкой прямо во время ввода —
+  // забыть нажать «Сохранить» больше нельзя.
+  const keySaveTimer = useRef<number | null>(null)
+  function saveKeyFor(p: Provider, v: string) {
+    setConfig(p === 'openrouter' ? { apiKeyOr: v } : p === 'cerebras' ? { apiKeyCb: v } : { apiKey: v })
+  }
+  function onKeyInput(v: string) {
+    setApiKey(v)
+    if (keySaveTimer.current) window.clearTimeout(keySaveTimer.current)
+    keySaveTimer.current = window.setTimeout(() => saveKeyFor(prov, v), 600)
+  }
+  function saveKeyNow() {
+    if (keySaveTimer.current) window.clearTimeout(keySaveTimer.current)
+    saveKeyFor(prov, keys[prov])
   }
 
   const best = available ? pickBestModel(available, prov) : null
@@ -197,7 +218,7 @@ export default function Settings() {
         </p>
         <label className="field">
           <span>API-ключ {pInfo.name}</span>
-          <input className="input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={pInfo.keyPrefix + '...'} />
+          <input className="input" type="password" value={apiKey} onChange={(e) => onKeyInput(e.target.value)} onBlur={saveKeyNow} placeholder={pInfo.keyPrefix + '...'} />
         </label>
         <label className="field">
           <span>Модель</span>
