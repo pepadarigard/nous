@@ -29,6 +29,7 @@ interface Store {
 
   setPlan: (p: StudyPlan) => void
   appendBlocks: (blocks: Block[]) => void
+  setPlanBlocks: (blocks: Block[]) => void
   ensureSubjectSetup: (ids: string[]) => void
   toggleLesson: (blockId: string, lessonId: string) => void
   dismissCelebration: (id: string) => void
@@ -83,6 +84,15 @@ export const useStore = create<Store>((set, get) => {
       commit((d) => {
         if (!d.plan || !blocks.length) return d
         d.plan.blocks = [...d.plan.blocks, ...blocks]
+        return d
+      }),
+
+    // Полная замена блоков (переделка плана ИИ): раскладка по дням начинается заново с сегодня.
+    setPlanBlocks: (blocks) =>
+      commit((d) => {
+        if (!d.plan || !blocks.length) return d
+        d.plan.blocks = blocks
+        d.plan.createdAt = new Date().toISOString()
         return d
       }),
 

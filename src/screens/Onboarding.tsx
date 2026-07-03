@@ -3,17 +3,12 @@ import { useStore } from '../store'
 import { SUBJECTS, WEEKDAYS, subjectName } from '../data/subjects'
 import { checkApiKey, humanError, isTauri, openExternal } from '../lib/api'
 import { modelLabel, modelScore, pickBestModel } from '../lib/models'
+import { EGE_YEAR, EXAM_DATE_DEFAULT } from '../data/ege2027'
 import PlanImporter from './PlanImporter'
 import { Check, KeyRound, ArrowRight, ArrowLeft, Target, Sparkles } from 'lucide-react'
 
 type Step = 'setup' | 'subjects' | 'goals' | 'schedule' | 'questions' | 'import'
 const STEPS: Step[] = ['setup', 'subjects', 'goals', 'schedule', 'questions', 'import']
-const QUESTIONS = [
-  'Как думаешь, какой у тебя сейчас уровень по этим предметам? (с нуля / база есть / хорошо, но надо подтянуть)',
-  'С чего хочешь начать — что важнее подтянуть в первую очередь?',
-  'Какие темы или типы заданий даются тяжелее всего?',
-  'Есть ли пожелания к плану — темп, формат, что избегать?',
-]
 
 export default function Onboarding() {
   const store = useStore()
@@ -29,8 +24,9 @@ export default function Onboarding() {
   const [goals, setGoalsState] = useState<Record<string, { current: string; target: string }>>({})
   const [hours, setHours] = useState<Record<string, string>>({})
   const [days, setDays] = useState<Record<string, number[]>>({})
-  const [examDate, setExamDate] = useState(store.data.examDate || '')
-  const [answers, setAnswers] = useState<Record<number, string>>({})
+  // Вопросы по каждому предмету: уровень/слабые места + пожелания; и общие пожелания к плану.
+  const [subjAnswers, setSubjAnswers] = useState<Record<string, { level: string; wish: string }>>({})
+  const [commonWish, setCommonWish] = useState('')
 
   const stepIndex = STEPS.indexOf(step)
 
@@ -97,12 +93,29 @@ export default function Onboarding() {
   }
   function saveScheduleAndNext() {
     store.setSchedules(sel.map((id) => ({ subjectId: id, hoursPerWeek: Number(hours[id]) || 4, days: days[id] ?? [1, 3, 5] })))
-    store.setExamDate(examDate || undefined)
+    // Дату не спрашиваем: все готовятся к ЕГЭ 2027 (основной период — конец мая). Сменить можно в Настройках.
+    store.setExamDate(store.data.examDate || EXAM_DATE_DEFAULT)
     setStep('questions')
   }
+  function setSubjAnswer(id: string, field: 'level' | 'wish', val: string) {
+    setSubjAnswers((a) => {
+      const prev = a[id] ?? { level: '', wish: '' }
+      return { ...a, [id]: { ...prev, [field]: val } }
+    })
+  }
   function saveQuestionsAndNext() {
-    const notes = QUESTIONS.map((q, i) => (answers[i]?.trim() ? `${q} — ${answers[i].trim()}` : '')).filter(Boolean).join('; ')
-    store.setPlanNotes(notes)
+    const parts = sel
+      .map((id) => {
+        const a = subjAnswers[id]
+        const bits = [
+          a?.level?.trim() ? `уровень и слабые места — ${a.level.trim()}` : '',
+          a?.wish?.trim() ? `пожелания — ${a.wish.trim()}` : '',
+        ].filter(Boolean)
+        return bits.length ? `${subjectName(id)}: ${bits.join('; ')}` : ''
+      })
+      .filter(Boolean)
+    if (commonWish.trim()) parts.push(`Общие пожелания к плану: ${commonWish.trim()}`)
+    store.setPlanNotes(parts.join('. '))
     setStep('import')
   }
 
@@ -222,11 +235,9 @@ export default function Onboarding() {
         {step === 'schedule' && (
           <div className="fade-in">
             <h1 style={{ fontSize: 24 }}>Сколько времени готов уделять?</h1>
-            <p className="muted" style={{ marginTop: 0 }}>Дни и нагрузка — на них ляжет план в календаре.</p>
-            <label className="field">
-              <span>Дата ближайшего экзамена (необязательно)</span>
-              <input className="input" type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} style={{ maxWidth: 220 }} />
-            </label>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Дни и нагрузка — на них ляжет план в календаре. Готовимся к <b>ЕГЭ {EGE_YEAR}</b> (конец мая) — дату менять не нужно.
+            </p>
             {sel.map((id) => (
               <div className="card soft" key={id} style={{ marginBottom: 12 }}>
                 <div className="row" style={{ marginBottom: 12 }}>
@@ -260,15 +271,38 @@ export default function Onboarding() {
           <div className="fade-in">
             <div className="row" style={{ gap: 10, marginBottom: 2 }}>
               <Sparkles size={22} color="var(--accent)" />
-              <h1 style={{ fontSize: 23, margin: 0 }}>Пара вопросов для точности</h1>
+              <h1 style={{ fontSize: 23, margin: 0 }}>Пара вопросов по каждому предмету</h1>
             </div>
-            <p className="muted" style={{ marginTop: 6 }}>Ответь коротко — эти ответы пойдут в промт, чтобы ИИ составил план точнее. Любой можно пропустить.</p>
-            {QUESTIONS.map((qq, i) => (
-              <label className="field" key={i}>
-                <span>{qq}</span>
-                <input className="input" value={answers[i] || ''} onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))} placeholder="Твой ответ…" />
-              </label>
+            <p className="muted" style={{ marginTop: 6 }}>Ответь коротко — это пойдёт в промт, чтобы план попал точно в твои слабые места. Любое поле можно пропустить.</p>
+            {sel.map((id) => (
+              <div className="card soft" key={id} style={{ marginBottom: 12 }}>
+                <div className="row" style={{ marginBottom: 10 }}>
+                  <b>{subjectName(id)}</b>
+                </div>
+                <label className="field">
+                  <span>Какой уровень сейчас и что даётся тяжелее всего?</span>
+                  <input
+                    className="input"
+                    value={subjAnswers[id]?.level || ''}
+                    onChange={(e) => setSubjAnswer(id, 'level', e.target.value)}
+                    placeholder="например: база есть, плаваю в стереометрии и задачах с параметром"
+                  />
+                </label>
+                <label className="field" style={{ marginBottom: 0 }}>
+                  <span>Пожелания по этому предмету</span>
+                  <input
+                    className="input"
+                    value={subjAnswers[id]?.wish || ''}
+                    onChange={(e) => setSubjAnswer(id, 'wish', e.target.value)}
+                    placeholder="например: упор на вторую часть, летом больше практики"
+                  />
+                </label>
+              </div>
             ))}
+            <label className="field">
+              <span>Общие пожелания к плану (темп, формат, чего избегать)</span>
+              <input className="input" value={commonWish} onChange={(e) => setCommonWish(e.target.value)} placeholder="например: по выходным не заниматься, люблю короткие занятия" />
+            </label>
             <div className="divider" />
             <div className="row">
               <button className="btn btn-ghost" onClick={() => setStep('schedule')}><ArrowLeft size={16} /> Назад</button>

@@ -61,7 +61,7 @@ export default function PlanScreen() {
           </div>
           <div className="spacer" />
           <div className="row wrap" style={{ gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" onClick={() => setRefineOpen(true)}><Wand2 size={15} /> Дописать план</button>
+            <button className="btn" onClick={() => setRefineOpen(true)}><Wand2 size={15} /> Изменить план</button>
             <button className="btn" onClick={() => setImportOpen(true)}><RefreshCw size={15} /> Обновить план</button>
           </div>
         </div>
@@ -99,7 +99,7 @@ export default function PlanScreen() {
         </Modal>
       )}
       {refineOpen && (
-        <Modal title="Дописать план" onClose={() => setRefineOpen(false)}>
+        <Modal title="Изменить план" onClose={() => setRefineOpen(false)}>
           <PlanExtender onDone={() => setRefineOpen(false)} />
         </Modal>
       )}

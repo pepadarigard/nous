@@ -13,6 +13,7 @@ import { KeyRound, RefreshCw, AlertTriangle, Wand2, Download, Upload, ExternalLi
 export default function Settings() {
   const data = useStore((s) => s.data)
   const setConfig = useStore((s) => s.setConfig)
+  const setExamDate = useStore((s) => s.setExamDate)
   const resetAll = useStore((s) => s.resetAll)
 
   const [apiKey, setApiKey] = useState(data.config.apiKey)
@@ -229,12 +230,21 @@ export default function Settings() {
           Сейчас в плане: {data.subjects.map(subjectName).join(', ') || '—'}
           {data.examDate ? ` · экзамен ${new Date(data.examDate).toLocaleDateString('ru-RU')}` : ''}
         </p>
+        <label className="field" style={{ maxWidth: 260 }}>
+          <span>Дата экзамена (ЕГЭ 2027)</span>
+          <input
+            className="input"
+            type="date"
+            value={data.examDate || ''}
+            onChange={(e) => setExamDate(e.target.value || undefined)}
+          />
+        </label>
         <div className="row wrap" style={{ gap: 10 }}>
           <button className="btn" onClick={() => setImportOpen(true)}><RefreshCw size={15} /> Обновить план (с нуля)</button>
-          <button className="btn" onClick={() => setRefineOpen(true)}><Wand2 size={15} /> Дописать план</button>
+          <button className="btn" onClick={() => setRefineOpen(true)}><Wand2 size={15} /> Изменить план (ИИ)</button>
         </div>
         <p className="small muted" style={{ marginBottom: 0, marginTop: 10 }}>
-          «Дописать план» — добавить свои пожелания обычными словами к уже готовому плану.
+          «Изменить план» — обычными словами: дополнить занятиями или переделать (порядок, наполнение, состав).
         </p>
       </div>
 
@@ -297,7 +307,7 @@ export default function Settings() {
         </Modal>
       )}
       {refineOpen && (
-        <Modal title="Дописать план" onClose={() => setRefineOpen(false)}>
+        <Modal title="Изменить план" onClose={() => setRefineOpen(false)}>
           <PlanExtender onDone={() => setRefineOpen(false)} />
         </Modal>
       )}

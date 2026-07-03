@@ -6,6 +6,7 @@
 import type { AppConfig, Block, Lesson, StudyPlan, SubjectGoal, SubjectSchedule } from '../types'
 import { groqRaw, isTauri, uid, type GroqBody } from './api'
 import { SUBJECTS, subjectName, WEEKDAYS } from '../data/subjects'
+import { EGE_YEAR, egeSpec } from '../data/ege2027'
 
 function useMock(): boolean {
   if (isTauri) return false
@@ -233,6 +234,13 @@ function weeksUntil(examDate?: string): number {
   return Math.max(4, diff)
 }
 
+// Общие требования к качеству занятий (используются и во внешнем промте, и в своей генерации).
+const LESSON_QUALITY =
+  '- description каждого занятия — ПОДРОБНАЯ инструкция в 2–3 предложения: ЧТО именно изучить/решить (тема, номер задания), ГДЕ (РешуЕГЭ, банк ФИПИ, kompege.ru для информатики), СКОЛЬКО (число заданий) и КАК закрепить (выписать ошибки, повторить правило).\n' +
+  '  Пример хорошего description: «Разбери правописание корней с чередованием (гар/гор, зар/зор, кас/кос). Затем реши 20 заданий №9 на РешуЕГЭ, раздел Орфография. Все слова с ошибками выпиши в личный словарик и проговори правило для каждого».\n' +
+  '  Плохо (так НЕ делай): «Изучить лексику», «Повторить теорию», «Порешать задачи».\n' +
+  '- Названия занятий — уникальные и конкретные (тема + что делаем).'
+
 /** Собирает готовый промт для внешнего ИИ (ChatGPT/DeepSeek). Чистая функция, без запроса. */
 export function buildPlanPrompt(input: PromptInput): string {
   const today = new Date().toISOString().slice(0, 10)
@@ -248,14 +256,19 @@ export function buildPlanPrompt(input: PromptInput): string {
       return `- ${subjectName(id)} (id: ${id}): сейчас ~${g?.current ?? '?'} → цель ${g?.target ?? '?'} баллов; занятия по дням: ${days} (${daysN} в неделю); нужно ≈${capacity} занятий`
     })
     .join('\n')
+  const specs = input.subjects
+    .map((id) => egeSpec(id))
+    .filter(Boolean)
+    .join('\n\n')
   const ids = input.subjects.join(', ')
   return [
-    `Ты — опытный репетитор и методист ЕГЭ. Составь подробный персональный план подготовки${input.studentName ? ` для ученика по имени ${input.studentName}` : ''}.`,
+    `Ты — опытный репетитор и методист ЕГЭ. Составь подробный персональный план подготовки к ЕГЭ ${EGE_YEAR}${input.studentName ? ` для ученика по имени ${input.studentName}` : ''}.`,
     '',
     'ДАННЫЕ УЧЕНИКА:',
     lines,
-    `Сегодня: ${today}. ${input.examDate ? `Экзамен: ${input.examDate} — впереди ≈${weeks} недель.` : 'Дата экзамена не указана — планируй примерно на 6 месяцев.'}`,
-    input.notes ? `\nПОЖЕЛАНИЯ И ОТВЕТЫ УЧЕНИКА (учти обязательно): ${input.notes}` : '',
+    `Сегодня: ${today}. Ученик сдаёт ЕГЭ ${EGE_YEAR}. ${input.examDate ? `Ориентир — ${input.examDate} (основной период), впереди ≈${weeks} недель.` : `Экзамен — конец мая ${EGE_YEAR}.`}`,
+    input.notes ? `\nОТВЕТЫ И ПОЖЕЛАНИЯ УЧЕНИКА ПО ПРЕДМЕТАМ (учти обязательно): ${input.notes}` : '',
+    specs ? `\nСТРУКТУРА ЭКЗАМЕНОВ (планируй строго под неё; детали ${EGE_YEAR} сверяй с демоверсиями ФИПИ):\n${specs}` : '',
     '',
     'МЕТОДИКА (следуй строго):',
     REFERENCE_METHODOLOGY,
@@ -269,12 +282,11 @@ export function buildPlanPrompt(input: PromptInput): string {
     'ТРЕБОВАНИЯ:',
     '- Разбей на тематические блоки (5–8 занятий в блоке); занятия: теория (kind="theory"), практика (kind="practice"), повторение (kind="review").',
     '- Число занятий по предмету — примерно как указано в данных ученика (±15%). НЕ делай план из 20–30 занятий на год: лучше дробить темы мелче и добавлять больше практики.',
-    '- Практика = конкретика: «реши 15–20 заданий №N по теме … на РешуЕГЭ» (информатика — kompege.ru). Без общих фраз типа «изучи теорию».',
+    LESSON_QUALITY,
     '- Регулярно вставляй kind="review", который возвращается к КОНКРЕТНЫМ уже пройденным темам.',
-    '- Названия занятий — уникальные и конкретные (тема + что делаем).',
     '',
     'ПЕРЕД ОТВЕТОМ ПРОВЕРЬ СЕБЯ:',
-    '(а) все разделы кодификатора покрыты; (б) порядок от простого к сложному; (в) количество занятий соответствует заданному; (г) в каждой практике написано ЧТО и ГДЕ решать; (д) есть финишный этап с пробниками.',
+    '(а) все разделы кодификатора покрыты; (б) порядок от простого к сложному; (в) количество занятий соответствует заданному; (г) каждый description подробный по образцу; (д) есть финишный этап с пробниками.',
     '',
     'ФОРМАТ ОТВЕТА — ОЧЕНЬ ВАЖНО:',
     `Верни ТОЛЬКО валидный JSON (без пояснений и без markdown-заборов). Поле subjectId бери СТРОГО из: ${ids}.`,
@@ -332,6 +344,162 @@ export async function importPlan(cfg: AppConfig, text: string, onProgress?: (m: 
     }))
   const subjects = [...new Set(blocks.map((b) => b.subjectId))]
   return { blocks, subjects, overview: cleanMath(String(data?.overview || 'Твой план подготовки.')) }
+}
+
+/**
+ * Генерация плана ПРЯМО В ПРИЛОЖЕНИИ (без внешнего ИИ): по каждому предмету — отдельный запрос
+ * к умной модели на ключе ученика, со спецификацией ЕГЭ и требованиями к качеству занятий.
+ */
+export async function generatePlanInApp(cfg: AppConfig, input: PromptInput, onProgress?: (m: string) => void): Promise<ImportResult> {
+  if (useMock()) {
+    const sid = input.subjects[0] || 'math_prof'
+    return {
+      blocks: input.subjects.flatMap((s, i) => mockBlocks(s, subjectName(s)).map((b, j) => ({ ...b, order: i * 10 + j }))),
+      subjects: input.subjects.length ? input.subjects : [sid],
+      overview: 'Демо-план (в браузере ИИ выключен).',
+    }
+  }
+  const today = new Date().toISOString().slice(0, 10)
+  const weeks = weeksUntil(input.examDate)
+  const allBlocks: Block[] = []
+  let order = 0
+  for (let i = 0; i < input.subjects.length; i++) {
+    const sid = input.subjects[i]
+    const name = subjectName(sid)
+    onProgress?.(`Генерирую: ${name} (${i + 1} из ${input.subjects.length})…`)
+    const g = input.goals.find((x) => x.subjectId === sid)
+    const s = input.schedules.find((x) => x.subjectId === sid)
+    const daysN = s?.days?.length || 5
+    // Потолок ниже, чем у внешнего ИИ: длинный JSON в одном ответе рвётся. Остальное — «Дописать план».
+    const target = Math.max(30, Math.min(70, daysN * weeks))
+    const spec = egeSpec(sid)
+    let data: any = null
+    try {
+      data = await callJSON(cfg, {
+        system:
+          `Ты — опытный методист ЕГЭ ${EGE_YEAR}. Составляешь план подготовки по предмету в строгом JSON. ` +
+          'Отвечай ТОЛЬКО валидным JSON без пояснений. ' + MATH_RULE,
+        user: [
+          `Предмет: ${name}. Ученик: сейчас ~${g?.current ?? '?'} баллов, цель ${g?.target ?? '?'}. Сегодня ${today}, экзамен ЕГЭ ${EGE_YEAR}${input.examDate ? ` (${input.examDate})` : ''}, впереди ≈${weeks} недель, занятий в неделю: ${daysN}.`,
+          input.notes ? `Пожелания ученика: ${input.notes}` : '',
+          spec ? `\nСТРУКТУРА ЭКЗАМЕНА:\n${spec}` : '',
+          `\nМЕТОДИКА:\n${REFERENCE_METHODOLOGY}`,
+          '\nЭТАПЫ по порядку: 1) фундамент; 2) все темы кодификатора от простого к сложному; 3) сложные задания (вторая часть); 4) финиш — повторение слабых мест и полные пробники.',
+          `\nСДЕЛАЙ ≈${target} занятий (блоки по 5–8 занятий). Требования:`,
+          LESSON_QUALITY,
+          '- Регулярно вставляй kind="review" с возвратом к конкретным пройденным темам.',
+          `\nJSON-схема: {"blocks":[{"subjectId":"${sid}","title":"тема блока","goal":"цель","lessons":[{"title":"...","kind":"theory|practice|review","description":"..."}]}]}`,
+        ].filter(Boolean).join('\n'),
+        temperature: 0.35,
+        maxTokens: 5000,
+      })
+    } catch {
+      // Запасная попытка: короче план, меньше токенов — надёжнее на лимитах.
+      onProgress?.(`Ещё раз, компактнее: ${name}…`)
+      try {
+        data = await callJSON(cfg, {
+          system: `Ты методист ЕГЭ ${EGE_YEAR}. Отвечай только валидным JSON. ` + MATH_RULE,
+          user:
+            `План подготовки: ${name}, с ${g?.current ?? '?'} до ${g?.target ?? '?'} баллов, ≈${Math.min(40, target)} занятий (блоки по 5–6).\n` +
+            (spec ? `СТРУКТУРА:\n${spec}\n` : '') +
+            LESSON_QUALITY +
+            `\nСхема: {"blocks":[{"subjectId":"${sid}","title":"...","goal":"...","lessons":[{"title":"...","kind":"theory|practice|review","description":"..."}]}]}`,
+          temperature: 0.3,
+          maxTokens: 3800,
+        })
+      } catch {
+        data = null
+      }
+    }
+    const blocks: Block[] = ((data?.blocks || []) as any[])
+      .filter((b: any) => b && (b.title || b.lessons))
+      .map((b: any) => ({
+        id: uid('blk_'),
+        subjectId: sid, // предмет фиксируем сами — модели иногда путают id
+        title: cleanMath(String(b.title || 'Блок')),
+        goal: cleanMath(String(b.goal || '')),
+        order: order++,
+        lessons: coerceLessons(b.lessons || []),
+      }))
+      .filter((b) => b.lessons.length > 0)
+    allBlocks.push(...blocks)
+    if (i < input.subjects.length - 1) await sleep(1500) // бережём rate-limit между предметами
+  }
+  if (!allBlocks.length) throw new Error('ИИ не вернул план. Попробуй ещё раз или используй путь через ChatGPT.')
+  const names = [...new Set(allBlocks.map((b) => b.subjectId))]
+  return {
+    blocks: allBlocks,
+    subjects: names,
+    overview: `План подготовки к ЕГЭ ${EGE_YEAR}: сначала фундамент, затем все темы кодификатора и финишное повторение с пробниками.`,
+  }
+}
+
+/**
+ * «Переделать план»: ИИ меняет существующий план по пожеланию — содержание занятий, порядок,
+ * состав блоков. Выполненные занятия сохраняются (переносим отметки по названию).
+ */
+export async function editPlan(cfg: AppConfig, plan: StudyPlan, wish: string, onProgress?: (m: string) => void): Promise<Block[]> {
+  const req = wish.trim()
+  if (!req) return []
+  onProgress?.('ИИ переделывает план…')
+  if (useMock()) {
+    // Демо: переворачиваем порядок блоков, чтобы изменение было видно.
+    return [...plan.blocks].reverse().map((b, i) => ({ ...b, order: i }))
+  }
+  // Компактное представление плана: без description, если он большой (иначе не влезет в ответ).
+  const totalLessons = plan.blocks.reduce((s, b) => s + b.lessons.length, 0)
+  const withDesc = totalLessons <= 45
+  const compact = plan.blocks.map((b) => ({
+    subjectId: b.subjectId,
+    title: b.title,
+    goal: b.goal,
+    lessons: b.lessons.map((l) => ({
+      title: l.title,
+      kind: l.kind,
+      done: l.done ? 1 : 0,
+      ...(withDesc ? { description: l.description } : {}),
+    })),
+  }))
+  const ids = SUBJECTS.map((s) => s.id)
+  const data = await callJSON(cfg, {
+    system:
+      `Ты редактируешь план подготовки к ЕГЭ ${EGE_YEAR} по пожеланию ученика. Можно: переставлять и удалять блоки/занятия, менять названия, kind и описания, добавлять новое. ` +
+      'НЕЛЬЗЯ: удалять или переименовывать занятия с done:1 (их можно только перемещать); трогать то, чего пожелание не касается (сохраняй дословно). ' +
+      'Описания изменённых/новых занятий делай подробными: что, где, сколько решать. Отвечай ТОЛЬКО валидным JSON. ' +
+      MATH_RULE,
+    user:
+      `ТЕКУЩИЙ ПЛАН:\n${JSON.stringify({ blocks: compact })}\n\n` +
+      `ПОЖЕЛАНИЕ УЧЕНИКА: ${req}\n\n` +
+      `Верни ПОЛНЫЙ обновлённый план: {"blocks":[{"subjectId":"<id>","title":"...","goal":"...","lessons":[{"title":"...","kind":"theory|practice|review","description":"..."}]}]}. subjectId СТРОГО из: ${ids.join(', ')}.`,
+    temperature: 0.3,
+    maxTokens: 8000,
+  })
+  const idSet = new Set(SUBJECTS.map((s) => s.id))
+  const oldByTitle = new Map(
+    plan.blocks.flatMap((b) => b.lessons.map((l) => [l.title.trim().toLowerCase(), l] as const)),
+  )
+  const blocks: Block[] = ((data?.blocks || []) as any[])
+    .filter((b: any) => b && (b.title || b.lessons))
+    .map((b: any, i: number) => ({
+      id: uid('blk_'),
+      subjectId: idSet.has(b.subjectId) ? b.subjectId : plan.blocks[0]?.subjectId || SUBJECTS[0].id,
+      title: cleanMath(String(b.title || `Блок ${i + 1}`)),
+      goal: cleanMath(String(b.goal || '')),
+      order: i,
+      lessons: coerceLessons(b.lessons || []).map((l) => {
+        const old = oldByTitle.get(l.title.trim().toLowerCase())
+        return {
+          ...l,
+          done: old?.done ?? false, // отметки выживают при переделке
+          completedAt: old?.completedAt,
+          // если описания в запрос не влезли и ИИ его не написал — возвращаем старое
+          description: l.description || old?.description || '',
+        }
+      }),
+    }))
+    .filter((b) => b.lessons.length > 0)
+  if (!blocks.length) throw new Error('ИИ не вернул обновлённый план. Сформулируй пожелание конкретнее и попробуй ещё раз.')
+  return blocks
 }
 
 // Краткая шпаргалка по реальной структуре ЕГЭ — чтобы модель не выдумывала «части» и номера заданий.

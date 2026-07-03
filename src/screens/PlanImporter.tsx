@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useStore } from '../store'
-import { buildPlanPrompt, importPlan } from '../lib/ai'
+import { buildPlanPrompt, importPlan, generatePlanInApp, type ImportResult } from '../lib/ai'
 import { subjectById } from '../data/subjects'
 import type { Block } from '../types'
-import { Copy, ArrowRight, ExternalLink, PartyPopper } from 'lucide-react'
+import { Copy, ArrowRight, ExternalLink, PartyPopper, Zap } from 'lucide-react'
 import { humanError, openExternal } from '../lib/api'
 
 // Сводка по разложенному плану: сколько занятий и до какой даты его хватит по расписанию.
@@ -81,6 +81,14 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
     setTimeout(() => setCopied(false), 1800)
   }
 
+  function applyResult(res: ImportResult) {
+    const subs = res.subjects.length ? res.subjects : store.data.subjects
+    store.setSubjects(subs)
+    store.ensureSubjectSetup(subs) // новым предметам — дефолтные цель и расписание
+    store.setPlan({ createdAt: new Date().toISOString(), examDate: store.data.examDate, overview: res.overview, blocks: res.blocks })
+    setSummary(buildSummary(res.blocks)) // сводка вместо мгновенного закрытия
+  }
+
   async function importIt() {
     if (!text.trim() || busy) return
     setError('')
@@ -92,12 +100,33 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
         setBusy('')
         return
       }
-      const subs = res.subjects.length ? res.subjects : store.data.subjects
-      store.setSubjects(subs)
-      store.ensureSubjectSetup(subs) // новым предметам — дефолтные цель и расписание
-      store.setPlan({ createdAt: new Date().toISOString(), examDate: store.data.examDate, overview: res.overview, blocks: res.blocks })
+      applyResult(res)
       setBusy('')
-      setSummary(buildSummary(res.blocks)) // показываем сводку вместо мгновенного закрытия
+    } catch (e) {
+      setError('Ошибка: ' + humanError(e))
+      setBusy('')
+    }
+  }
+
+  async function generateIt() {
+    if (busy) return
+    setError('')
+    setBusy('Готовлюсь…')
+    try {
+      const res = await generatePlanInApp(
+        store.data.config,
+        {
+          subjects: store.data.subjects,
+          goals: store.data.goals,
+          schedules: store.data.schedules,
+          examDate: store.data.examDate,
+          studentName: store.data.studentName,
+          notes: store.data.planNotes,
+        },
+        (m) => setBusy(m),
+      )
+      applyResult(res)
+      setBusy('')
     } catch (e) {
       setError('Ошибка: ' + humanError(e))
       setBusy('')
@@ -166,11 +195,26 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
         onFocus={(e) => e.currentTarget.select()}
         style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12.5, background: 'var(--panel-2)' }}
       />
-      <div className="row" style={{ margin: '10px 0 22px' }}>
+      <div className="row" style={{ margin: '10px 0 14px' }}>
         <button className="btn btn-primary" onClick={copy}>
           <Copy size={15} /> {copied ? 'Скопировано ✓' : 'Скопировать промт'}
         </button>
       </div>
+
+      <div className="row" style={{ gap: 10, margin: '0 0 8px' }}>
+        <span className="small muted">или</span>
+        <button className="btn" onClick={generateIt} disabled={!!busy}>
+          <Zap size={15} /> Сгенерировать прямо в приложении
+        </button>
+        <span className="small muted">на твоём ключе Groq, ~минута на предмет</span>
+      </div>
+      {busy && (
+        <div className="row" style={{ margin: '4px 0 10px', gap: 10 }}>
+          <div className="spin" style={{ width: 18, height: 18, borderWidth: 3 }} />
+          <span className="muted small">{busy}</span>
+        </div>
+      )}
+      <div style={{ height: 8 }} />
 
       <div className="row" style={{ gap: 8 }}>
         {chip('Шаг 2')}
@@ -185,12 +229,6 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
         onChange={(e) => setText(e.target.value)}
         style={{ resize: 'vertical' }}
       />
-      {busy && (
-        <div className="row" style={{ marginTop: 10, gap: 10 }}>
-          <div className="spin" style={{ width: 20, height: 20, borderWidth: 3 }} />
-          <span className="muted small">{busy}</span>
-        </div>
-      )}
       {error && <p className="small" style={{ color: 'var(--danger)' }}>{error}</p>}
       <div className="row" style={{ marginTop: 16 }}>
         <div className="spacer" />
