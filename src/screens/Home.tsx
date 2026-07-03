@@ -94,7 +94,7 @@ export default function Home() {
         </div>
       )}
 
-      <div className="grid cols-4" style={{ marginBottom: 22 }}>
+      <div className="grid cols-4 stagger" style={{ marginBottom: 22 }}>
         <div className="stat">
           <div className="row" style={{ gap: 8, color: 'var(--accent)' }}><Target size={17} /><span className="lbl" style={{ margin: 0 }}>Общий прогресс</span></div>
           <div className="val">{pct}%</div>
@@ -114,7 +114,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="grid cols-2" style={{ alignItems: 'start' }}>
+      <div className="grid cols-2 stagger" style={{ alignItems: 'start' }}>
         <div className="card">
           <div className="row" style={{ marginBottom: 12 }}>
             <h3 style={{ margin: 0 }}>📌 Сегодня</h3>

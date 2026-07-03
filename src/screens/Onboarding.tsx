@@ -7,12 +7,14 @@ import { EGE_YEAR, EXAM_DATE_DEFAULT } from '../data/ege2027'
 import PlanImporter from './PlanImporter'
 import { Check, KeyRound, ArrowRight, ArrowLeft, Target, Sparkles } from 'lucide-react'
 
-type Step = 'setup' | 'subjects' | 'goals' | 'schedule' | 'questions' | 'import'
-const STEPS: Step[] = ['setup', 'subjects', 'goals', 'schedule', 'questions', 'import']
+type Step = 'welcome' | 'setup' | 'subjects' | 'goals' | 'schedule' | 'questions' | 'import'
+const STEPS: Step[] = ['welcome', 'setup', 'subjects', 'goals', 'schedule', 'questions', 'import']
+// Точки прогресса — без приветственного экрана.
+const DOT_STEPS = STEPS.filter((s) => s !== 'welcome')
 
 export default function Onboarding() {
   const store = useStore()
-  const [step, setStep] = useState<Step>('setup')
+  const [step, setStep] = useState<Step>('welcome')
 
   const [apiKey, setApiKey] = useState(store.data.config.apiKey)
   const [textModel, setTextModel] = useState(store.data.config.textModel)
@@ -28,7 +30,6 @@ export default function Onboarding() {
   const [subjAnswers, setSubjAnswers] = useState<Record<string, { level: string; wish: string }>>({})
   const [commonWish, setCommonWish] = useState('')
 
-  const stepIndex = STEPS.indexOf(step)
 
   async function doCheck() {
     setChecking(true)
@@ -120,13 +121,32 @@ export default function Onboarding() {
   }
 
   return (
-    <div className="center-wrap">
-      <div className="onb-card fade-in">
-        <div className="stepper">
-          {STEPS.map((s, i) => (
-            <div key={s} className={'dot' + (i <= stepIndex ? ' on' : '')} />
-          ))}
-        </div>
+    <div className="center-wrap ambient">
+      <div className={'onb-card fade-in' + (step === 'welcome' ? ' onb-welcome' : '')}>
+        {step !== 'welcome' && (
+          <div className="stepper">
+            {DOT_STEPS.map((s, i) => (
+              <div key={s} className={'dot' + (i <= DOT_STEPS.indexOf(step) ? ' on' : '')} />
+            ))}
+          </div>
+        )}
+
+        {step === 'welcome' && (
+          <div className="welcome">
+            <div className="w-logo">ν</div>
+            <h1 className="w-title">Nous</h1>
+            <p className="w-tag">Личный штаб подготовки к ЕГЭ {EGE_YEAR}</p>
+            <div className="w-feats">
+              <div className="w-feat"><span className="w-ic">🗓</span><div><b>План под тебя</b><span>сильный ИИ раскладывает подготовку по дням — под твои цели и расписание</span></div></div>
+              <div className="w-feat"><span className="w-ic">📈</span><div><b>Виден рост</b><span>уровни, серии, достижения и честный прогресс к баллам мечты</span></div></div>
+              <div className="w-feat"><span className="w-ic">💬</span><div><b>Репетитор 24/7</b><span>объяснит тему и разберёт задание прямо в приложении</span></div></div>
+            </div>
+            <button className="btn btn-primary btn-lg w-cta" onClick={() => setStep('setup')}>
+              Начать подготовку <ArrowRight size={18} />
+            </button>
+            <p className="small muted w-note">Бесплатно · без регистрации · все данные хранятся только у тебя</p>
+          </div>
+        )}
 
         {step === 'setup' && (
           <div className="fade-in">

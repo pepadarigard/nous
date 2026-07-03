@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { subjectById } from '../data/subjects'
 import type { Block, StudyPlan } from '../types'
@@ -27,11 +28,17 @@ const axis = { stroke: '#9aa1ad', fontSize: 12 }
 const tip = { background: '#fff', border: '1px solid #e7e9ee', borderRadius: 10, color: '#1b1e26' }
 const WD = ['Пн', '', 'Ср', '', 'Пт', '', '']
 
-/** Кольцо прогресса уровня: заполнение = доля XP внутри текущего уровня. */
+/** Кольцо прогресса уровня: заполнение = доля XP внутри текущего уровня. Дорисовывается при открытии. */
 function LevelRing({ level, pct }: { level: number; pct: number }) {
   const R = 54
   const C = 2 * Math.PI * R
-  const filled = Math.max(0.02, pct / 100) * C
+  const target = Math.max(0.02, pct / 100) * C
+  const [drawn, setDrawn] = useState(false)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setDrawn(true))
+    return () => cancelAnimationFrame(id)
+  }, [])
+  const filled = drawn ? target : 0.02
   return (
     <svg className="lvl-ring" viewBox="0 0 130 130" width="132" height="132">
       <defs>
@@ -111,7 +118,7 @@ export default function ProgressScreen() {
       </div>
 
       {/* Активность + кривая роста */}
-      <div className="grid cols-2" style={{ margin: '16px 0 22px', alignItems: 'stretch' }}>
+      <div className="grid cols-2 stagger" style={{ margin: '16px 0 22px', alignItems: 'stretch' }}>
         <div className="card">
           <div className="row" style={{ marginBottom: 14 }}>
             <h3 style={{ margin: 0 }}>Твоя активность</h3>
@@ -124,7 +131,7 @@ export default function ProgressScreen() {
             </div>
             <div className="heat">
               {st.heat.map((col, ci) => (
-                <div className="heat-col" key={ci}>
+                <div className="heat-col" key={ci} style={{ animationDelay: `${ci * 30}ms` }}>
                   {col.map((d, di) => (
                     <div key={di} className={`heat-cell l${d.lvl}${d.future ? ' fut' : ''}`} title={`${d.date}: ${d.count} зан.`} />
                   ))}
@@ -170,7 +177,7 @@ export default function ProgressScreen() {
           <div className="spacer" />
           <span className="chip">{st.unlockedCount} / {st.achievements.length}</span>
         </div>
-        <div className="ach-grid">
+        <div className="ach-grid stagger">
           {st.achievements.map((a) => (
             <div className={'ach' + (a.unlocked ? ' on' : '')} key={a.id} title={a.desc}>
               <div className="ach-ic">{a.unlocked ? a.icon : '🔒'}</div>
@@ -198,7 +205,7 @@ export default function ProgressScreen() {
               )}
             </div>
           </div>
-          <div className="grid cols-2">
+          <div className="grid cols-2 stagger">
             {rows.map(({ g, subj, done: d, total: t, pct, est }) => (
               <div className="card subj-card" key={g.subjectId}>
                 <div className="subj-top">
