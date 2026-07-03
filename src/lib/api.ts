@@ -2,7 +2,7 @@
 // В Tauri — вызовы Rust-команд; в браузере — localStorage + прямой fetch/файловый input.
 
 import type { AppData, Provider } from '../types'
-import { PROVIDERS } from './providers'
+import { OR_FALLBACK_MODELS, PROVIDERS } from './providers'
 
 export const isTauri =
   typeof window !== 'undefined' &&
@@ -57,6 +57,13 @@ export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider
   const p = PROVIDERS[provider]
   const payload: Record<string, unknown> = { ...body }
   if (provider !== 'groq') delete payload.reasoning_format // параметр только Groq — другие провайдеры его не знают
+  if (provider === 'openrouter') {
+    // Бесплатные модели часто перегружены (429 upstream) — даём OpenRouter цепочку запасных,
+    // он сам переключится. Формат: массив `models` ВМЕСТО одиночного `model`.
+    const chain = [body.model, ...OR_FALLBACK_MODELS.filter((m) => m !== body.model)]
+    payload.models = chain
+    delete payload.model
+  }
   const bodyStr = JSON.stringify(payload)
   let text: string
   if (isTauri) {
@@ -133,7 +140,7 @@ export function humanError(e: unknown): string {
   const m = String((e as any)?.message ?? e ?? '')
   const low = m.toLowerCase()
   if (/invalid api key|401|unauthorized|invalid_api_key/.test(low)) return 'Неверный API-ключ. Проверь его в Настройках.'
-  if (/rate limit|429|too many/.test(low)) return 'Лимит запросов Groq исчерпан — подожди минуту и попробуй ещё раз.'
+  if (/rate limit|429|too many|rate-limited/.test(low)) return 'Модели ИИ сейчас перегружены или лимит запросов исчерпан — подожди 20–30 секунд и попробуй ещё раз.'
   if (/timed? ?out|timeout/.test(low)) return 'Сервер не ответил вовремя. Проверь интернет и попробуй ещё раз.'
   if (/error sending request|dns|connect|network|failed to fetch|отправки запроса/.test(low))
     return 'Нет соединения с сервером ИИ. Если ты в России и без VPN — переключи провайдера на OpenRouter в Настройках (он работает без VPN).'

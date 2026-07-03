@@ -43,6 +43,17 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
   },
 }
 
+// Запасные бесплатные модели OpenRouter: если выбранная перегружена (429 upstream),
+// OpenRouter сам переключится на следующую из списка (поле `models` в запросе).
+export const OR_FALLBACK_MODELS = [
+  'openai/gpt-oss-120b:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'qwen/qwen3-next-80b-a3b-instruct:free',
+  'openai/gpt-oss-20b:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
+]
+
 export function providerOf(cfg: AppConfig): ProviderInfo {
   return PROVIDERS[cfg.provider && PROVIDERS[cfg.provider] ? cfg.provider : 'groq']
 }
