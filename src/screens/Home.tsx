@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { subjectById } from '../data/subjects'
 import type { Block, Lesson } from '../types'
-import { agendaByDate, blockColors, todayItems, type AgendaItem } from '../lib/schedule'
+import { agendaByDate, blockColors, type AgendaItem } from '../lib/schedule'
 import LessonDetail from './LessonDetail'
 import { Flame, CalendarClock, CheckCircle2, Target, RotateCcw, ArrowRight, Check } from 'lucide-react'
 
@@ -73,7 +73,7 @@ export default function Home() {
   if (data.examDate) daysLeft = Math.ceil((new Date(data.examDate).getTime() - Date.now()) / 86400000)
 
   const agenda = agendaByDate(plan, data.schedules)
-  const today: AgendaItem[] = todayItems(plan, data.schedules)
+  const today: AgendaItem[] = agenda[iso(new Date())] || []
   const tmr = new Date()
   tmr.setDate(tmr.getDate() + 1)
   const tomorrow: AgendaItem[] = agenda[iso(tmr)] || []

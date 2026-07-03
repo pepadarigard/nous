@@ -1,35 +1,67 @@
 use base64::{engine::general_purpose, Engine as _};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::time::Duration;
 use tauri::Manager;
 
 const GROQ_CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODELS_URL: &str = "https://api.groq.com/openai/v1/models";
+
+/// Один HTTP-клиент на всё приложение + таймаут, чтобы запрос не завис навсегда.
+fn http() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(75))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .expect("reqwest client")
+    })
+}
 
 fn state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("state.json"))
 }
 
-/// Загрузить сохранённое состояние приложения (JSON-строка) или None.
+fn is_valid_json(s: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(s).is_ok()
+}
+
+/// Загрузить сохранённое состояние (JSON-строка) или None.
+/// Если основной файл битый (обрыв записи) — восстанавливаемся из бэкапа.
 #[tauri::command]
 fn load_state(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let path = state_path(&app)?;
-    if path.exists() {
-        fs::read_to_string(&path).map(Some).map_err(|e| e.to_string())
-    } else {
-        Ok(None)
+    if let Ok(s) = fs::read_to_string(&path) {
+        if is_valid_json(&s) {
+            return Ok(Some(s));
+        }
     }
+    let bak = path.with_extension("json.bak");
+    if let Ok(s) = fs::read_to_string(&bak) {
+        if is_valid_json(&s) {
+            return Ok(Some(s));
+        }
+    }
+    Ok(None)
 }
 
-/// Сохранить состояние приложения (JSON-строка).
+/// Сохранить состояние атомарно: старый файл → .bak, новое → .tmp → rename.
+/// Так обрыв в любой момент не теряет данные (есть либо старый файл, либо бэкап).
 #[tauri::command]
 fn save_state(app: tauri::AppHandle, data: String) -> Result<(), String> {
     let path = state_path(&app)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(&path, data).map_err(|e| e.to_string())
+    if path.exists() {
+        let _ = fs::copy(&path, path.with_extension("json.bak"));
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, &data).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
 /// Прочитать выбранный пользователем файл и вернуть его содержимое в base64.
@@ -42,8 +74,7 @@ fn read_file_bytes(path: String) -> Result<String, String> {
 /// Прокси-запрос к Groq (chat/completions). Тело формируется на фронте, ключ здесь.
 #[tauri::command]
 async fn groq_request(api_key: String, body: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
-    let resp = client
+    let resp = http()
         .post(GROQ_CHAT_URL)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
@@ -57,8 +88,7 @@ async fn groq_request(api_key: String, body: String) -> Result<String, String> {
 /// Список моделей аккаунта (для проверки ключа).
 #[tauri::command]
 async fn groq_models(api_key: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
-    let resp = client
+    let resp = http()
         .get(GROQ_MODELS_URL)
         .header("Authorization", format!("Bearer {}", api_key))
         .send()

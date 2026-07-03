@@ -142,12 +142,17 @@ export function computeStats(data: AppData): Stats {
   const plan: StudyPlan | undefined = data.plan
   const lessons = (plan?.blocks || []).flatMap((b) => b.lessons)
   const done = lessons.filter((l) => l.done)
+
+  // XP и счётчики достижений — из ИСТОРИИ событий, а не из галочек текущего плана:
+  // так они переживают «Обновить план» (уровень не обнуляется). Старые события без kind = 10 XP.
+  const doneEvents = data.progress.filter((e) => e.type === 'lesson_done')
   const byKind: Record<LessonKind, number> = { theory: 0, practice: 0, review: 0 }
   let xp = 0
-  done.forEach((l) => {
-    byKind[l.kind] = (byKind[l.kind] || 0) + 1
-    xp += POINTS[l.kind] ?? 10
+  doneEvents.forEach((e) => {
+    if (e.kind) byKind[e.kind] = (byKind[e.kind] || 0) + 1
+    xp += e.kind ? (POINTS[e.kind] ?? 10) : 10
   })
+  const lifetimeDone = doneEvents.length
 
   // предметов на 100% готовности
   const bySub: Record<string, { d: number; t: number }> = {}
@@ -173,10 +178,10 @@ export function computeStats(data: AppData): Stats {
 
   const A = (id: string, icon: string, title: string, desc: string, unlocked: boolean): Achievement => ({ id, icon, title, desc, unlocked })
   const achievements: Achievement[] = [
-    A('first', '🌱', 'Первый шаг', 'Пройти 1 занятие', doneCount >= 1),
-    A('ten', '📚', 'Десятка', 'Пройти 10 занятий', doneCount >= 10),
-    A('quarter', '💪', 'Полсотни', 'Пройти 50 занятий', doneCount >= 50),
-    A('hundred', '🏆', 'Сотня', 'Пройти 100 занятий', doneCount >= 100),
+    A('first', '🌱', 'Первый шаг', 'Пройти 1 занятие', lifetimeDone >= 1),
+    A('ten', '📚', 'Десятка', 'Пройти 10 занятий', lifetimeDone >= 10),
+    A('quarter', '💪', 'Полсотни', 'Пройти 50 занятий', lifetimeDone >= 50),
+    A('hundred', '🏆', 'Сотня', 'Пройти 100 занятий', lifetimeDone >= 100),
     A('streak3', '🔥', 'Разогрев', '3 дня подряд', best >= 3),
     A('streak7', '🔥', 'Неделя силы', '7 дней подряд', best >= 7),
     A('streak30', '⚡', 'Железная воля', '30 дней подряд', best >= 30),

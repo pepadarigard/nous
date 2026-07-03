@@ -124,16 +124,16 @@ export function dayLabel(dateISO: string): string {
   return `${WD_FULL[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}`
 }
 
-/** Карта «дата (ISO) → занятия» для календарной сетки. */
-export function agendaByDate(plan: StudyPlan, schedules: SubjectSchedule[], horizon = 250): Record<string, AgendaItem[]> {
+/** Карта «дата (ISO) → занятия» для календарной сетки. Горизонт полный (как у buildAgenda). */
+export function agendaByDate(plan: StudyPlan, schedules: SubjectSchedule[]): Record<string, AgendaItem[]> {
   const map: Record<string, AgendaItem[]> = {}
-  for (const d of buildAgenda(plan, schedules, horizon)) map[d.dateISO] = d.items
+  for (const d of buildAgenda(plan, schedules)) map[d.dateISO] = d.items
   return map
 }
 
-/** Занятия на сегодня (для главной). */
+/** Занятия на сегодня (для главной). ВАЖНО: горизонт полный — раскладка идёт от даты создания плана,
+ * и «сегодня» может быть далеко от неё (короткий горизонт делал главную пустой через пару дней). */
 export function todayItems(plan: StudyPlan, schedules: SubjectSchedule[]): AgendaItem[] {
-  const agenda = buildAgenda(plan, schedules, 3)
   const todayISO = iso(startOfDay(new Date()))
-  return agenda.find((d) => d.dateISO === todayISO)?.items ?? []
+  return buildAgenda(plan, schedules).find((d) => d.dateISO === todayISO)?.items ?? []
 }

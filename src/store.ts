@@ -4,11 +4,17 @@ import { emptyData } from './types'
 import { loadState, saveState, uid } from './lib/api'
 import { computeStats, type Celebration } from './lib/stats'
 
+export interface ChatMsg {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 interface Store {
   loaded: boolean
   data: AppData
   planStatus: string
   celebrations: Celebration[]
+  chatMsgs: ChatMsg[] // живёт в памяти сессии — чат не теряется при переходах между экранами
 
   init: () => Promise<void>
   setPlanStatus: (s: string) => void
@@ -25,6 +31,8 @@ interface Store {
   appendBlocks: (blocks: Block[]) => void
   toggleLesson: (blockId: string, lessonId: string) => void
   dismissCelebration: (id: string) => void
+  setChatMsgs: (msgs: ChatMsg[]) => void
+  clearChat: () => void
 
   finishOnboarding: () => void
   resetAll: () => void
@@ -45,6 +53,7 @@ export const useStore = create<Store>((set, get) => {
     data: emptyData(),
     planStatus: '',
     celebrations: [],
+    chatMsgs: [],
 
     init: async () => {
       const saved = await loadState()
@@ -87,8 +96,22 @@ export const useStore = create<Store>((set, get) => {
       lesson.completedAt = lesson.done ? new Date().toISOString() : undefined
 
       const celebs: Celebration[] = []
+      if (!lesson.done) {
+        // Снятие отметки: убираем события этого занятия, иначе серию/карту/XP можно накрутить toggle'ом.
+        // Старые события без lessonId чистим по label (совпадает с названием).
+        const label = `Пройдено: ${lesson.title}`
+        next.progress = next.progress.filter(
+          (e) => e.type !== 'lesson_done' || (e.lessonId ? e.lessonId !== lesson.id : e.label !== label),
+        )
+      }
       if (lesson.done) {
-        pushProgress(next, { type: 'lesson_done', subjectId: block!.subjectId, label: `Пройдено: ${lesson.title}` })
+        pushProgress(next, {
+          type: 'lesson_done',
+          subjectId: block!.subjectId,
+          label: `Пройдено: ${lesson.title}`,
+          lessonId: lesson.id,
+          kind: lesson.kind,
+        })
         const after = computeStats(next)
         const gained = after.xp - before.xp
         if (gained > 0) celebs.push({ id: uid('cel_'), kind: 'xp', xp: gained })
@@ -105,6 +128,8 @@ export const useStore = create<Store>((set, get) => {
       saveState(next).catch((e) => console.error('saveState', e))
     },
     dismissCelebration: (id) => set({ celebrations: get().celebrations.filter((c) => c.id !== id) }),
+    setChatMsgs: (msgs) => set({ chatMsgs: msgs }),
+    clearChat: () => set({ chatMsgs: [] }),
 
     finishOnboarding: () => commit((d) => ({ ...d, onboarded: true })),
     resetAll: () => commit(() => emptyData()),

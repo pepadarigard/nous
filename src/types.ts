@@ -54,6 +54,8 @@ export interface ProgressEvent {
   type: ProgressType
   subjectId?: string
   label: string
+  lessonId?: string // чтобы удалить событие при снятии отметки (иначе статистика накручивается)
+  kind?: LessonKind // для честного XP по истории (переживает обновление плана)
 }
 
 export interface AppConfig {

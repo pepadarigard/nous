@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
-import { useStore } from '../store'
+import { useStore, type ChatMsg } from '../store'
 import { tutorChat } from '../lib/ai'
 import { mdToHtml } from '../lib/md'
 import { openExternal } from '../lib/api'
-import { Send } from 'lucide-react'
+import { Send, Trash2 } from 'lucide-react'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+// В Groq шлём только хвост истории — иначе долгий чат упирается в лимиты контекста.
+const CONTEXT_WINDOW = 12
 
 // Ссылки в ответах ИИ открываем во внешнем браузере, а не внутри окна приложения.
 function handleLinkClick(e: React.MouseEvent) {
@@ -20,7 +22,9 @@ function handleLinkClick(e: React.MouseEvent) {
 
 export default function Chat() {
   const cfg = useStore((s) => s.data.config)
-  const [msgs, setMsgs] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const msgs = useStore((s) => s.chatMsgs)
+  const setMsgs = useStore((s) => s.setChatMsgs)
+  const clearChat = useStore((s) => s.clearChat)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [thinking, setThinking] = useState(false)
@@ -34,9 +38,9 @@ export default function Chat() {
   // Плавный вывод ответа ИИ по буквам, с рендером markdown на лету.
   // Медленно и красиво: посимвольно, с короткими паузами на знаках препинания;
   // общее время ограничено, чтобы длинные ответы не тянулись бесконечно.
-  async function typeOut(base: { role: 'user' | 'assistant'; content: string }[], full: string) {
+  async function typeOut(base: ChatMsg[], full: string) {
     setStreaming(true)
-    const put = (c: string) => setMsgs([...base, { role: 'assistant' as const, content: c }])
+    const put = (c: string) => setMsgs([...base, { role: 'assistant', content: c }])
     const total = full.length
     const INTERVAL = 24
     const maxTicks = Math.round(4800 / INTERVAL) // ~200 шагов на длинный ответ
@@ -54,7 +58,7 @@ export default function Chat() {
   async function send() {
     const q = input.trim()
     if (!q || busy) return
-    const base = [...msgs, { role: 'user' as const, content: q }]
+    const base: ChatMsg[] = [...msgs, { role: 'user', content: q }]
     setMsgs(base)
     setInput('')
     setBusy(true)
@@ -63,7 +67,7 @@ export default function Chat() {
     try {
       // Ждём ответ И минимум 2 секунды — что раньше кончится, тем дольше ждём.
       const [a] = await Promise.all([
-        tutorChat(cfg, base.map((m) => ({ role: m.role, content: m.content }))),
+        tutorChat(cfg, base.slice(-CONTEXT_WINDOW).map((m) => ({ role: m.role, content: m.content }))),
         sleep(2000),
       ])
       ans = a || 'Пустой ответ.'
@@ -78,8 +82,18 @@ export default function Chat() {
   return (
     <div className="fade-in">
       <div className="page-head">
-        <h1>Чат с ИИ 💬</h1>
-        <p>Спроси по теме, попроси объяснить задание или разобрать ошибку.</p>
+        <div className="row">
+          <div>
+            <h1>Чат с ИИ 💬</h1>
+            <p>Спроси по теме, попроси объяснить задание или разобрать ошибку.</p>
+          </div>
+          <div className="spacer" />
+          {msgs.length > 0 && !busy && (
+            <button className="btn btn-ghost" onClick={clearChat} title="Очистить чат">
+              <Trash2 size={15} /> Очистить
+            </button>
+          )}
+        </div>
       </div>
       <div className="chat-wrap">
         <div className="chat-scroll" ref={scrollRef} onClick={handleLinkClick}>
