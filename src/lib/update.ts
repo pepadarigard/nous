@@ -3,7 +3,7 @@
 import { isTauri } from './api'
 
 // Публичный репозиторий проекта (owner/repo). Используется для проверки обновлений.
-export const GITHUB_REPO = 'meelli/nous'
+export const GITHUB_REPO = 'meellikv-ship-it/nous'
 export const GITHUB_URL = `https://github.com/${GITHUB_REPO}`
 const FALLBACK_VERSION = '0.1.0'
 
