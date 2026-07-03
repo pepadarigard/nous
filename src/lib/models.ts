@@ -23,6 +23,8 @@ const PRIORITY: ModelInfo[] = [
   { match: /glm-4/i, label: 'GLM 4', hint: 'умная, хороший русский', score: 76 },
   { match: /gigachat.*pro/i, label: 'GigaChat Pro', hint: 'умная, отличный русский', score: 71 },
   { match: /gigachat/i, label: 'GigaChat', hint: 'быстрая, отличный русский', score: 55 },
+  { match: /yandexgpt-lite/i, label: 'YandexGPT Lite', hint: 'быстрая и дешёвая', score: 35 },
+  { match: /yandexgpt/i, label: 'YandexGPT', hint: 'надёжная, русский родной', score: 58 },
   { match: /gemini.*flash/i, label: 'Gemini Flash', hint: 'быстрая и толковая', score: 74 },
   { match: /qwen-?3-next-80b/i, label: 'Qwen3 Next 80B', hint: 'новая и умная', score: 72 },
   { match: /qwen\/qwen3\.6/i, label: 'Qwen3.6', hint: 'новая и быстрая', score: 70 },

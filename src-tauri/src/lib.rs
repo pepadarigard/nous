@@ -4,11 +4,12 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
-/// Разрешённые сервисы ИИ: Groq (нужен VPN в РФ), OpenRouter и Cerebras (работают в РФ без VPN).
+/// Разрешённые сервисы ИИ: Groq (нужен VPN в РФ), OpenRouter/Cerebras (в РФ без VPN), YandexGPT (РФ).
 fn allowed_api(url: &str) -> bool {
     url.starts_with("https://api.groq.com/")
         || url.starts_with("https://openrouter.ai/")
         || url.starts_with("https://api.cerebras.ai/")
+        || url.starts_with("https://llm.api.cloud.yandex.net/")
 }
 
 // ===== GigaChat (Сбер): российский провайдер, гарантированно работает в РФ =====
@@ -172,15 +173,17 @@ fn save_state(app: tauri::AppHandle, data: String) -> Result<(), String> {
 }
 
 /// Прокси-запрос к провайдеру ИИ (OpenAI-совместимый chat/completions). Тело формируется на фронте.
+/// auth_prefix: "Bearer" (по умолчанию) или "Api-Key" (YandexGPT).
 #[tauri::command]
-async fn llm_request(api_key: String, body: String, base: String) -> Result<String, String> {
+async fn llm_request(api_key: String, body: String, base: String, auth_prefix: Option<String>) -> Result<String, String> {
     let url = format!("{}/chat/completions", base.trim_end_matches('/'));
     if !allowed_api(&url) {
         return Err("Недопустимый адрес сервиса ИИ".into());
     }
+    let prefix = auth_prefix.unwrap_or_else(|| "Bearer".into());
     let resp = http()
         .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", format!("{} {}", prefix, api_key))
         .header("Content-Type", "application/json")
         .header("X-Title", "Nous")
         .body(body)

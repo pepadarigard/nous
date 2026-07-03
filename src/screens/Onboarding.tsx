@@ -25,7 +25,9 @@ export default function Onboarding() {
     openrouter: store.data.config.apiKeyOr || '',
     cerebras: store.data.config.apiKeyCb || '',
     gigachat: store.data.config.apiKeyGc || '',
+    yandex: store.data.config.apiKeyYa || '',
   })
+  const [yaFolder, setYaFolder] = useState(store.data.config.yandexFolder || '')
   const apiKey = keys[prov]
   const pInfo = PROVIDERS[prov]
   const setApiKey = (v: string) => setKeys((k) => ({ ...k, [prov]: v }))
@@ -47,7 +49,7 @@ export default function Onboarding() {
   async function doCheck() {
     setChecking(true)
     setCheckMsg(null)
-    const r = await checkApiKey(apiKey, prov)
+    const r = await checkApiKey(apiKey, prov, { folder: yaFolder })
     setChecking(false)
     if (r.ok) {
       // Сразу подбираем самую сильную модель из доступных у провайдера (для OpenRouter — из бесплатных).
@@ -90,7 +92,7 @@ export default function Onboarding() {
     if (!model) {
       // Тихо подбираем самую сильную прямо сейчас.
       try {
-        const r = await checkApiKey(apiKey, prov)
+        const r = await checkApiKey(apiKey, prov, { folder: yaFolder })
         const best = r.models?.length ? pickBestModel(r.models, prov) : null
         if (best) model = best
       } catch {
@@ -98,7 +100,17 @@ export default function Onboarding() {
       }
     }
     if (!model) model = pInfo.defaultModel // сеть подвела — надёжный дефолт провайдера
-    store.setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, apiKeyGc: keys.gigachat, textModel: model, modelAutoPicked: true })
+    store.setConfig({
+      provider: prov,
+      apiKey: keys.groq,
+      apiKeyOr: keys.openrouter,
+      apiKeyCb: keys.cerebras,
+      apiKeyGc: keys.gigachat,
+      apiKeyYa: keys.yandex,
+      yandexFolder: yaFolder.trim(),
+      textModel: model,
+      modelAutoPicked: true,
+    })
     setStep('subjects')
   }
   function saveSubjectsAndNext() {
@@ -202,6 +214,14 @@ export default function Onboarding() {
                 </div>
                 <div className="check">{prov === 'gigachat' && <Check size={14} />}</div>
               </div>
+              <div className={'subject-card' + (prov === 'yandex' ? ' sel' : '')} onClick={() => { setProv('yandex'); setCheckMsg(null) }}>
+                <span className="emoji">🟡</span>
+                <div>
+                  <div style={{ fontWeight: 700 }}>YandexGPT</div>
+                  <div className="small muted">Яндекс · в России без VPN · нужен Yandex Cloud</div>
+                </div>
+                <div className="check">{prov === 'yandex' && <Check size={14} />}</div>
+              </div>
               <div className={'subject-card' + (prov === 'groq' ? ' sel' : '')} onClick={() => { setProv('groq'); setCheckMsg(null) }}>
                 <span className="emoji">⚡</span>
                 <div>
@@ -218,7 +238,9 @@ export default function Onboarding() {
               </a>{' '}
               {prov === 'gigachat'
                 ? '(вход по Сбер ID → создай проект GigaChat API → скопируй «Ключ авторизации»)'
-                : '(регистрация → Create API Key → скопируй ключ)'}
+                : prov === 'yandex'
+                  ? '(консоль Yandex Cloud → сервисный аккаунт → API-ключ; там же скопируй Folder ID каталога)'
+                  : '(регистрация → Create API Key → скопируй ключ)'}
             </p>
             <label className="field">
               <span><KeyRound size={13} style={{ verticalAlign: -2, marginRight: 5 }} />API-ключ {pInfo.name}</span>
@@ -230,6 +252,12 @@ export default function Onboarding() {
                 onChange={(e) => { setApiKey(e.target.value); setCheckMsg(null) }}
               />
             </label>
+            {prov === 'yandex' && (
+              <label className="field">
+                <span>Folder ID (каталог Yandex Cloud)</span>
+                <input className="input" placeholder="b1g..." value={yaFolder} onChange={(e) => { setYaFolder(e.target.value); setCheckMsg(null) }} />
+              </label>
+            )}
             <p className="small muted" style={{ marginTop: 0 }}>
               🧠 Модель ИИ подберём автоматически — самую умную из доступных (сменить можно в Настройках).
             </p>

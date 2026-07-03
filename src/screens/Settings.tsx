@@ -23,7 +23,9 @@ export default function Settings() {
     openrouter: data.config.apiKeyOr || '',
     cerebras: data.config.apiKeyCb || '',
     gigachat: data.config.apiKeyGc || '',
+    yandex: data.config.apiKeyYa || '',
   })
+  const [yaFolder, setYaFolder] = useState(data.config.yandexFolder || '')
   const apiKey = keys[prov]
   const setApiKey = (v: string) => setKeys((k) => ({ ...k, [prov]: v }))
   const pInfo = PROVIDERS[prov]
@@ -55,7 +57,7 @@ export default function Settings() {
     appVersion().then(setVersion)
     const k = activeKey(data.config)
     if (k) {
-      checkApiKey(k, data.config.provider ?? 'groq').then((r) => {
+      checkApiKey(k, data.config.provider ?? 'groq', { folder: data.config.yandexFolder }).then((r) => {
         if (r.ok && r.models?.length) setAvailable(r.models)
       })
     }
@@ -95,6 +97,7 @@ export default function Settings() {
       p === 'openrouter' ? { apiKeyOr: v }
       : p === 'cerebras' ? { apiKeyCb: v }
       : p === 'gigachat' ? { apiKeyGc: v }
+      : p === 'yandex' ? { apiKeyYa: v }
       : { apiKey: v },
     )
   }
@@ -112,14 +115,14 @@ export default function Settings() {
   const smarter = best && modelScore(best) > modelScore(textModel) ? best : null
 
   function save() {
-    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, apiKeyGc: keys.gigachat, textModel })
+    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, apiKeyGc: keys.gigachat, apiKeyYa: keys.yandex, yandexFolder: yaFolder.trim(), textModel })
     setSaved(true)
     setTimeout(() => setSaved(false), 1600)
   }
   async function check() {
     setChecking(true)
     setCheckMsg(null)
-    const r = await checkApiKey(apiKey, prov)
+    const r = await checkApiKey(apiKey, prov, { folder: yaFolder })
     setChecking(false)
     setCheckMsg(r.ok ? { ok: true, text: `Рабочий. Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: humanError(r.error || 'Ошибка') })
     if (r.models?.length) setAvailable(r.models)
@@ -128,7 +131,7 @@ export default function Settings() {
   function useSmartest() {
     if (!smarter) return
     setTextModel(smarter)
-    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, apiKeyGc: keys.gigachat, textModel: smarter, modelAutoPicked: true })
+    setConfig({ provider: prov, textModel: smarter, modelAutoPicked: true })
   }
 
   async function doExport() {
@@ -217,6 +220,9 @@ export default function Settings() {
           <button className={'seg-btn' + (prov === 'cerebras' ? ' on' : '')} onClick={() => switchProv('cerebras')}>
             🚀 Cerebras
           </button>
+          <button className={'seg-btn' + (prov === 'yandex' ? ' on' : '')} onClick={() => switchProv('yandex')}>
+            🟡 Яндекс
+          </button>
           <button className={'seg-btn' + (prov === 'groq' ? ' on' : '')} onClick={() => switchProv('groq')}>
             ⚡ Groq (VPN)
           </button>
@@ -229,6 +235,17 @@ export default function Settings() {
           <span>API-ключ {pInfo.name}</span>
           <input className="input" type="password" value={apiKey} onChange={(e) => onKeyInput(e.target.value)} onBlur={saveKeyNow} placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'ключ авторизации (Authorization Key)'} />
         </label>
+        {prov === 'yandex' && (
+          <label className="field">
+            <span>Folder ID (каталог Yandex Cloud)</span>
+            <input
+              className="input"
+              value={yaFolder}
+              onChange={(e) => { setYaFolder(e.target.value); setConfig({ yandexFolder: e.target.value.trim() }) }}
+              placeholder="b1g..."
+            />
+          </label>
+        )}
         <label className="field">
           <span>Модель</span>
           <select className="select" value={textModel} onChange={(e) => setTextModel(e.target.value)}>

@@ -50,7 +50,19 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     hint: 'Сбер — гарантированно работает в России, отличный русский',
     defaultModel: 'GigaChat',
   },
+  yandex: {
+    id: 'yandex',
+    name: 'YandexGPT',
+    base: 'https://llm.api.cloud.yandex.net/v1', // OpenAI-совместимый эндпоинт Yandex Cloud
+    keysUrl: 'https://console.yandex.cloud',
+    keyPrefix: 'AQVN',
+    hint: 'Яндекс — гарантированно работает в России (нужен аккаунт Yandex Cloud и Folder ID)',
+    defaultModel: 'yandexgpt/latest',
+  },
 }
+
+/** Модели YandexGPT: их /models не отдаёт список — держим известный набор. */
+export const YANDEX_MODELS = ['yandexgpt/latest', 'yandexgpt-lite/latest']
 
 // Запасные бесплатные модели OpenRouter: если выбранная перегружена (429 upstream),
 // OpenRouter сам переключится на следующую из списка (поле `models` в запросе).
@@ -72,5 +84,6 @@ export function activeKey(cfg: AppConfig): string {
   if (cfg.provider === 'openrouter') return cfg.apiKeyOr || ''
   if (cfg.provider === 'cerebras') return cfg.apiKeyCb || ''
   if (cfg.provider === 'gigachat') return cfg.apiKeyGc || ''
+  if (cfg.provider === 'yandex') return cfg.apiKeyYa || ''
   return cfg.apiKey
 }
