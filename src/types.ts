@@ -61,7 +61,6 @@ export interface ProgressEvent {
 export interface AppConfig {
   apiKey: string
   textModel: string
-  visionModel: string
   showEstimate?: boolean // показывать приблизительный балл по прогрессу (по умолчанию да)
   soundOn?: boolean // звук при новом уровне/достижении (по умолчанию да)
 }
@@ -81,13 +80,12 @@ export interface AppData {
 }
 
 export const DEFAULT_TEXT_MODEL = 'qwen/qwen3-32b'
-export const DEFAULT_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 
 export function emptyData(): AppData {
   return {
     version: 2,
     onboarded: false,
-    config: { apiKey: '', textModel: DEFAULT_TEXT_MODEL, visionModel: DEFAULT_VISION_MODEL, showEstimate: true, soundOn: true },
+    config: { apiKey: '', textModel: DEFAULT_TEXT_MODEL, showEstimate: true, soundOn: true },
     subjects: [],
     goals: [],
     schedules: [],

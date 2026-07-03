@@ -29,6 +29,7 @@ interface Store {
 
   setPlan: (p: StudyPlan) => void
   appendBlocks: (blocks: Block[]) => void
+  ensureSubjectSetup: (ids: string[]) => void
   toggleLesson: (blockId: string, lessonId: string) => void
   dismissCelebration: (id: string) => void
   setChatMsgs: (msgs: ChatMsg[]) => void
@@ -82,6 +83,18 @@ export const useStore = create<Store>((set, get) => {
       commit((d) => {
         if (!d.plan || !blocks.length) return d
         d.plan.blocks = [...d.plan.blocks, ...blocks]
+        return d
+      }),
+
+    // После импорта/дописывания плана: новые предметы получают дефолтные цель и расписание,
+    // иначе они не видны в «Прогрессе по предметам» и не попадают в промт.
+    ensureSubjectSetup: (ids) =>
+      commit((d) => {
+        for (const id of ids) {
+          if (!d.subjects.includes(id)) d.subjects.push(id)
+          if (!d.goals.some((g) => g.subjectId === id)) d.goals.push({ subjectId: id, current: 50, target: 80 })
+          if (!d.schedules.some((s) => s.subjectId === id)) d.schedules.push({ subjectId: id, hoursPerWeek: 6, days: [1, 2, 3, 4, 5] })
+        }
         return d
       }),
 

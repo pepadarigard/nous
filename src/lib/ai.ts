@@ -312,8 +312,8 @@ export async function importPlan(cfg: AppConfig, text: string, onProgress?: (m: 
   return { blocks, subjects, overview: cleanMath(String(data?.overview || 'Твой план подготовки.')) }
 }
 
-/** Чат-репетитор. */
-export async function tutorChat(cfg: AppConfig, messages: { role: string; content: string }[]): Promise<string> {
+/** Чат-репетитор. studentCtx — краткая справка об ученике (предметы, баллы, цели), чтобы отвечать точнее. */
+export async function tutorChat(cfg: AppConfig, messages: { role: string; content: string }[], studentCtx?: string): Promise<string> {
   if (useMock()) return 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
   const resp = await groqRawRetry(cfg.apiKey, {
     model: cfg.textModel,
@@ -323,7 +323,8 @@ export async function tutorChat(cfg: AppConfig, messages: { role: string; conten
         content:
           'Ты — терпеливый и умный репетитор по подготовке к ЕГЭ. Объясняешь понятно, по шагам, с примерами, по-русски. Если уместно — предложи какие задания порешать на РешуЕГЭ/ФИПИ. ' +
           'Оформляй ответ в Markdown: подзаголовки (##), списки (- ), жирный (**важное**) — так удобнее читать. ' +
-          MATH_RULE,
+          MATH_RULE +
+          (studentCtx ? `\n\nТвой ученик: ${studentCtx}. Учитывай его предметы и уровень в ответах.` : ''),
       },
       ...messages,
     ],

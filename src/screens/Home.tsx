@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { subjectById } from '../data/subjects'
 import type { Block, Lesson } from '../types'
 import { agendaByDate, blockColors, type AgendaItem } from '../lib/schedule'
+import { currentStreak } from '../lib/stats'
 import LessonDetail from './LessonDetail'
 import { Flame, CalendarClock, CheckCircle2, Target, RotateCcw, ArrowRight, Check } from 'lucide-react'
 
@@ -14,17 +15,6 @@ const kindLabel: Record<Lesson['kind'], string> = { theory: 'Теория', prac
 
 function iso(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-function computeStreak(dates: string[]): number {
-  const days = new Set(dates.map((d) => new Date(d).toDateString()))
-  let streak = 0
-  const cur = new Date()
-  if (!days.has(cur.toDateString())) cur.setDate(cur.getDate() - 1)
-  while (days.has(cur.toDateString())) {
-    streak++
-    cur.setDate(cur.getDate() - 1)
-  }
-  return streak
 }
 
 function Row({ block, lesson, color, onToggle, onOpen }: { block: Block; lesson: Lesson; color: string; onToggle?: (b: string, l: string) => void; onOpen: Open }) {
@@ -68,7 +58,7 @@ export default function Home() {
   const total = allPairs.length
   const done = allPairs.filter((x) => x.lesson.done).length
   const pct = total ? Math.round((done / total) * 100) : 0
-  const streak = computeStreak(data.progress.map((p) => p.at))
+  const streak = currentStreak(data.progress) // единая логика со «Прогрессом»: только реальные занятия
   let daysLeft: number | null = null
   if (data.examDate) daysLeft = Math.ceil((new Date(data.examDate).getTime() - Date.now()) / 86400000)
 

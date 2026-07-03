@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { buildPlanPrompt, importPlan } from '../lib/ai'
 import { Copy, ArrowRight, ExternalLink } from 'lucide-react'
-import { openExternal } from '../lib/api'
+import { humanError, openExternal } from '../lib/api'
 
 // Получить/обновить план от внешнего ИИ: промт → копировать → вставить ответ → разложить.
 export default function PlanImporter({ onDone }: { onDone: () => void }) {
@@ -53,14 +53,12 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
       }
       const subs = res.subjects.length ? res.subjects : store.data.subjects
       store.setSubjects(subs)
-      if (!store.data.schedules.length) {
-        store.setSchedules(subs.map((id) => ({ subjectId: id, hoursPerWeek: 6, days: [1, 2, 3, 4, 5] })))
-      }
+      store.ensureSubjectSetup(subs) // новым предметам — дефолтные цель и расписание
       store.setPlan({ createdAt: new Date().toISOString(), examDate: store.data.examDate, overview: res.overview, blocks: res.blocks })
       setBusy('')
       onDone()
-    } catch (e: any) {
-      setError('Ошибка: ' + (e?.message || 'не удалось разобрать'))
+    } catch (e) {
+      setError('Ошибка: ' + humanError(e))
       setBusy('')
     }
   }

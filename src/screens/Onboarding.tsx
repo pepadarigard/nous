@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { SUBJECTS, WEEKDAYS, subjectName } from '../data/subjects'
-import { checkApiKey, isTauri, openExternal } from '../lib/api'
-import { DEFAULT_VISION_MODEL } from '../types'
+import { checkApiKey, humanError, isTauri, openExternal } from '../lib/api'
 import PlanImporter from './PlanImporter'
 import { Check, KeyRound, ArrowRight, ArrowLeft, Target, Sparkles } from 'lucide-react'
 
@@ -39,7 +38,7 @@ export default function Onboarding() {
     setCheckMsg(null)
     const r = await checkApiKey(apiKey)
     setChecking(false)
-    setCheckMsg(r.ok ? { ok: true, text: `Ключ рабочий! Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: r.error || 'Ключ не подошёл' })
+    setCheckMsg(r.ok ? { ok: true, text: `Ключ рабочий! Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: humanError(r.error || 'Ключ не подошёл') })
   }
   function toggleSubject(id: string) {
     setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
@@ -64,7 +63,7 @@ export default function Onboarding() {
   }
 
   function saveSetupAndNext() {
-    store.setConfig({ apiKey, textModel, visionModel: DEFAULT_VISION_MODEL })
+    store.setConfig({ apiKey, textModel })
     setStep('subjects')
   }
   function saveSubjectsAndNext() {

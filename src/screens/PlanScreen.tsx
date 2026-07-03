@@ -132,6 +132,8 @@ function AgendaList({
   onToggle: (b: string, l: string) => void
   onOpen: Open
 }) {
+  const [showOverdue, setShowOverdue] = useState(false)
+  const todayISO = iso(new Date())
   const agenda = buildAgenda(plan, schedules)
     .map((d) => ({ ...d, items: d.items.filter((i) => matchSubject(i.block.subjectId)) }))
     .filter((d) => d.items.length)
@@ -145,10 +147,37 @@ function AgendaList({
     )
   }
 
+  // Прошлые дни не захламляют ленту: несделанное сворачивается в «Просрочено», сделанное живёт в «Прогрессе».
+  const overdueDays = agenda
+    .filter((d) => d.dateISO < todayISO)
+    .map((d) => ({ ...d, items: d.items.filter((i) => !i.lesson.done) }))
+    .filter((d) => d.items.length)
+  const overdueCount = overdueDays.reduce((s, d) => s + d.items.length, 0)
+  const upcoming = agenda.filter((d) => d.dateISO >= todayISO)
+
   return (
     <div className="grid" style={{ gap: 22 }}>
-      {agenda.map((day) => {
-        const isToday = dayLabel(day.dateISO) === 'Сегодня'
+      {overdueCount > 0 && (
+        <div className="card" style={{ background: '#fff9ef', borderColor: '#f3dfb6' }}>
+          <div className="row" style={{ gap: 10 }}>
+            <b>⏰ Просрочено: {overdueCount}</b>
+            <span className="small muted">— не отмечено из прошлых дней. Догони или просто продолжай с сегодня.</span>
+            <div className="spacer" />
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowOverdue(!showOverdue)}>
+              {showOverdue ? 'Скрыть' : 'Показать'}
+            </button>
+          </div>
+          {showOverdue && overdueDays.map((day) => (
+            <div key={day.dateISO} style={{ marginTop: 14 }}>
+              <div className="small muted" style={{ marginBottom: 6, fontWeight: 650 }}>{dayLabel(day.dateISO)}</div>
+              {day.items.map((it) => <LessonRow key={it.lesson.id} item={it} onToggle={onToggle} onOpen={onOpen} />)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {upcoming.map((day) => {
+        const isToday = day.dateISO === todayISO
         const doneN = day.items.filter((i) => i.lesson.done).length
         return (
           <div key={day.dateISO}>
@@ -162,6 +191,9 @@ function AgendaList({
           </div>
         )
       })}
+      {upcoming.length === 0 && (
+        <p className="muted small">Будущих занятий не осталось — обнови план или нажми «Дописать план».</p>
+      )}
     </div>
   )
 }

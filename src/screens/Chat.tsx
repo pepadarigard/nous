@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useStore, type ChatMsg } from '../store'
 import { tutorChat } from '../lib/ai'
 import { mdToHtml } from '../lib/md'
-import { openExternal } from '../lib/api'
+import { humanError, openExternal } from '../lib/api'
+import { subjectName } from '../data/subjects'
 import { Send, Trash2 } from 'lucide-react'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -22,6 +23,7 @@ function handleLinkClick(e: React.MouseEvent) {
 
 export default function Chat() {
   const cfg = useStore((s) => s.data.config)
+  const data = useStore((s) => s.data)
   const msgs = useStore((s) => s.chatMsgs)
   const setMsgs = useStore((s) => s.setChatMsgs)
   const clearChat = useStore((s) => s.clearChat)
@@ -65,14 +67,23 @@ export default function Chat() {
     setThinking(true)
     let ans = ''
     try {
+      // Краткая справка об ученике — чтобы репетитор отвечал в контексте его предметов и целей.
+      const ctx = [
+        data.studentName ? `имя ${data.studentName}` : '',
+        ...data.subjects.map((id) => {
+          const g = data.goals.find((x) => x.subjectId === id)
+          return `${subjectName(id)} (${g ? `сейчас ~${g.current}, цель ${g.target}` : 'баллы не указаны'})`
+        }),
+        data.examDate ? `экзамен ${data.examDate}` : '',
+      ].filter(Boolean).join('; ')
       // Ждём ответ И минимум 2 секунды — что раньше кончится, тем дольше ждём.
       const [a] = await Promise.all([
-        tutorChat(cfg, base.slice(-CONTEXT_WINDOW).map((m) => ({ role: m.role, content: m.content }))),
+        tutorChat(cfg, base.slice(-CONTEXT_WINDOW).map((m) => ({ role: m.role, content: m.content })), ctx),
         sleep(2000),
       ])
       ans = a || 'Пустой ответ.'
-    } catch (e: any) {
-      ans = 'Ошибка: ' + (e?.message || '')
+    } catch (e) {
+      ans = '⚠️ ' + humanError(e)
     }
     setThinking(false)
     await typeOut(base, ans)

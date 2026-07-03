@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { extendPlan } from '../lib/ai'
+import { humanError } from '../lib/api'
 import { Wand2, RefreshCw } from 'lucide-react'
 
 // «Дописать план» — в один клик дополняет СУЩЕСТВУЮЩИЙ план новыми занятиями по пожеланию ученика.
@@ -26,11 +27,12 @@ export default function PlanExtender({ onDone }: { onDone: () => void }) {
       }
       const n = blocks.reduce((s, b) => s + b.lessons.length, 0)
       store.appendBlocks(blocks)
+      store.ensureSubjectSetup([...new Set(blocks.map((b) => b.subjectId))])
       setAddedN(n)
       setWish('')
       setBusy('')
-    } catch (e: any) {
-      setError('Ошибка: ' + (e?.message || 'не удалось дополнить план'))
+    } catch (e) {
+      setError('Ошибка: ' + humanError(e))
       setBusy('')
     }
   }

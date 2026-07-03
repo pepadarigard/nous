@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store'
-import { checkApiKey } from '../lib/api'
+import { checkApiKey, humanError } from '../lib/api'
 import { subjectName } from '../data/subjects'
 import Modal from '../ui/Modal'
 import PlanImporter from './PlanImporter'
@@ -33,7 +33,7 @@ export default function Settings() {
     setCheckMsg(null)
     const r = await checkApiKey(apiKey)
     setChecking(false)
-    setCheckMsg(r.ok ? { ok: true, text: `Рабочий. Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: r.error || 'Ошибка' })
+    setCheckMsg(r.ok ? { ok: true, text: `Рабочий. Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: humanError(r.error || 'Ошибка') })
   }
 
   return (

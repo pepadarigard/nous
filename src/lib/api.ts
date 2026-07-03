@@ -101,55 +101,21 @@ export async function checkApiKey(apiKey: string): Promise<{ ok: boolean; error?
   }
 }
 
-export interface PickedFile {
-  name: string
-  bytes: Uint8Array
-}
-
-/** Выбор файлов пользователем (материалы для разбора). */
-export async function pickFiles(): Promise<PickedFile[]> {
-  if (isTauri) {
-    const { open } = await import('@tauri-apps/plugin-dialog')
-    const sel = await open({
-      multiple: true,
-      filters: [
-        { name: 'Материалы', extensions: ['pdf', 'docx', 'png', 'jpg', 'jpeg', 'webp', 'txt', 'md'] },
-      ],
-    })
-    if (!sel) return []
-    const paths = Array.isArray(sel) ? sel : [sel]
-    const out: PickedFile[] = []
-    for (const p of paths) {
-      const b64 = await invoke<string>('read_file_bytes', { path: p })
-      out.push({ name: (p as string).split(/[\\/]/).pop() || (p as string), bytes: b64ToBytes(b64) })
-    }
-    return out
-  }
-  return new Promise((resolve) => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.multiple = true
-    input.accept = '.pdf,.docx,.png,.jpg,.jpeg,.webp,.txt,.md'
-    input.onchange = async () => {
-      const files = Array.from(input.files || [])
-      const out: PickedFile[] = []
-      for (const f of files) out.push({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })
-      resolve(out)
-    }
-    input.click()
-  })
-}
-
 /** Уникальный id без внешних зависимостей. */
 export function uid(prefix = ''): string {
   return prefix + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
 }
 
-function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return bytes
+/** Переводит технические ошибки (Rust/Groq/fetch, по-английски) в понятный русский. */
+export function humanError(e: unknown): string {
+  const m = String((e as any)?.message ?? e ?? '')
+  const low = m.toLowerCase()
+  if (/invalid api key|401|unauthorized|invalid_api_key/.test(low)) return 'Неверный API-ключ. Проверь его в Настройках.'
+  if (/rate limit|429|too many/.test(low)) return 'Лимит запросов Groq исчерпан — подожди минуту и попробуй ещё раз.'
+  if (/timed? ?out|timeout/.test(low)) return 'Сервер не ответил вовремя. Проверь интернет и попробуй ещё раз.'
+  if (/error sending request|dns|connect|network|failed to fetch|отправки запроса/.test(low)) return 'Нет соединения с интернетом (или Groq недоступен).'
+  if (/413|too large|context length|maximum context/.test(low)) return 'Запрос слишком длинный для модели.'
+  return m || 'Неизвестная ошибка.'
 }
 
 /** Открыть ссылку во внешнем браузере (Tauri) или новой вкладке (браузер). */

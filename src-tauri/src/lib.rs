@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose, Engine as _};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -64,13 +63,6 @@ fn save_state(app: tauri::AppHandle, data: String) -> Result<(), String> {
     fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-/// Прочитать выбранный пользователем файл и вернуть его содержимое в base64.
-#[tauri::command]
-fn read_file_bytes(path: String) -> Result<String, String> {
-    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-    Ok(general_purpose::STANDARD.encode(bytes))
-}
-
 /// Прокси-запрос к Groq (chat/completions). Тело формируется на фронте, ключ здесь.
 #[tauri::command]
 async fn groq_request(api_key: String, body: String) -> Result<String, String> {
@@ -101,7 +93,6 @@ async fn groq_models(api_key: String) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -115,7 +106,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_state,
             save_state,
-            read_file_bytes,
             groq_request,
             groq_models
         ])
