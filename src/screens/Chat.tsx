@@ -4,7 +4,7 @@ import { tutorChat } from '../lib/ai'
 import { mdToHtml } from '../lib/md'
 import { humanError, openExternal } from '../lib/api'
 import { subjectName } from '../data/subjects'
-import { Send, Trash2 } from 'lucide-react'
+import { Send, Trash2, Copy, Check, Square, ArrowUpRight } from 'lucide-react'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 // В Groq шлём только хвост истории — иначе долгий чат упирается в лимиты контекста.
@@ -21,6 +21,27 @@ function handleLinkClick(e: React.MouseEvent) {
   }
 }
 
+// Готовые подсказки на пустом экране — под предметы ученика, чтобы можно было начать в один клик.
+const SUBJECT_HINTS: Record<string, string> = {
+  russian: 'Объясни, как писать сочинение (задание 27) по русскому',
+  math_prof: 'Как решать задание 13 по профильной математике?',
+  math_base: 'Разбери типовое задание по базовой математике',
+  informatics: 'Разбери задание 27 по информатике с кодом',
+  physics: 'Как решать задачи на механику по физике?',
+}
+function buildSuggestions(subjects: string[]): string[] {
+  const out: string[] = []
+  if (subjects[0]) out.push(`С чего начать подготовку по предмету «${subjectName(subjects[0])}»?`)
+  for (const s of subjects) {
+    if (out.length >= 3) break
+    if (SUBJECT_HINTS[s]) out.push(SUBJECT_HINTS[s])
+  }
+  out.push('Разбери мою ошибку — я скину условие задания и своё решение')
+  out.push('Составь список тем, которые надо выучить в первую очередь')
+  // Уникальные, максимум 4 карточки.
+  return [...new Set(out)].slice(0, 4)
+}
+
 export default function Chat() {
   const cfg = useStore((s) => s.data.config)
   const data = useStore((s) => s.data)
@@ -31,8 +52,12 @@ export default function Chat() {
   const [busy, setBusy] = useState(false)
   const [thinking, setThinking] = useState(false)
   const [streaming, setStreaming] = useState(false)
+  const [copied, setCopied] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const stopRef = useRef(false)
+
+  const suggestions = buildSuggestions(data.subjects)
 
   // Поле ввода растёт под текст (до ~5 строк), после отправки сжимается обратно.
   function autoGrow() {
@@ -43,31 +68,46 @@ export default function Chat() {
   }
 
   useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight)
   }, [msgs, thinking, streaming])
 
+  async function copyMsg(i: number, text: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(i)
+      setTimeout(() => setCopied((c) => (c === i ? null : c)), 1400)
+    } catch {
+      /* буфер недоступен — молча пропускаем */
+    }
+  }
+
   // Плавный вывод ответа ИИ по буквам, с рендером markdown на лету.
-  // Медленно и красиво: посимвольно, с короткими паузами на знаках препинания;
-  // общее время ограничено, чтобы длинные ответы не тянулись бесконечно.
+  // Посимвольно, с короткими паузами на знаках препинания; можно прервать кнопкой «стоп».
   async function typeOut(base: ChatMsg[], full: string) {
+    stopRef.current = false
     setStreaming(true)
     const put = (c: string) => setMsgs([...base, { role: 'assistant', content: c }])
     const total = full.length
-    const INTERVAL = 24
-    const maxTicks = Math.round(4800 / INTERVAL) // ~200 шагов на длинный ответ
+    const INTERVAL = 22
+    const maxTicks = Math.round(4600 / INTERVAL)
     const ticks = Math.min(total, maxTicks)
     const step = Math.max(1, Math.ceil(total / Math.max(ticks, 1)))
     for (let i = step; i < total; i += step) {
+      if (stopRef.current) break
       put(full.slice(0, i))
       const ch = full[i - 1]
-      await sleep(/[.!?\n]/.test(ch) ? INTERVAL + 140 : /[,;:—]/.test(ch) ? INTERVAL + 60 : INTERVAL)
+      await sleep(/[.!?\n]/.test(ch) ? INTERVAL + 130 : /[,;:—]/.test(ch) ? INTERVAL + 55 : INTERVAL)
     }
     put(full)
     setStreaming(false)
   }
 
-  async function send() {
-    const q = input.trim()
+  async function sendText(text: string) {
+    const q = text.trim()
     if (!q || busy) return
     const base: ChatMsg[] = [...msgs, { role: 'user', content: q }]
     setMsgs(base)
@@ -86,11 +126,11 @@ export default function Chat() {
         }),
         data.examDate ? `экзамен ${data.examDate}` : '',
       ].filter(Boolean).join('; ')
-      // Ждём ответ И минимум 2 секунды — что раньше кончится, тем дольше ждём.
-      const [a] = await Promise.all([
-        tutorChat(cfg, base.slice(-CONTEXT_WINDOW).map((m) => ({ role: m.role, content: m.content })), ctx),
-        sleep(2000),
-      ])
+      const a = await tutorChat(
+        cfg,
+        base.slice(-CONTEXT_WINDOW).map((m) => ({ role: m.role, content: m.content })),
+        ctx,
+      )
       ans = a || 'Пустой ответ.'
     } catch (e) {
       ans = '⚠️ ' + humanError(e)
@@ -100,13 +140,21 @@ export default function Chat() {
     setBusy(false)
   }
 
+  function onSendClick() {
+    if (streaming) {
+      stopRef.current = true // прервать анимацию печати — показать ответ целиком
+      return
+    }
+    sendText(input)
+  }
+
   return (
-    <div className="fade-in">
+    <div className="fade-in chat-page">
       <div className="page-head">
         <div className="row">
           <div>
             <h1>Чат с ИИ 💬</h1>
-            <p>Спроси по теме, попроси объяснить задание или разобрать ошибку.</p>
+            <p>Твой репетитор: объяснит тему, разберёт задание, поможет с ошибкой.</p>
           </div>
           <div className="spacer" />
           {msgs.length > 0 && !busy && (
@@ -119,27 +167,67 @@ export default function Chat() {
       <div className="chat-wrap">
         <div className="chat-scroll" ref={scrollRef} onClick={handleLinkClick}>
           {msgs.length === 0 && !thinking && (
-            <div className="empty">
-              <div className="big">💬</div>
-              <p>Задай первый вопрос — например «объясни, как решать задание 13 по математике».</p>
+            <div className="chat-empty">
+              <div className="ce-av">ν</div>
+              <h2>{data.studentName ? `Привет, ${data.studentName}!` : 'Привет!'} Я твой ИИ-репетитор</h2>
+              <p>Объясню тему, разберу задание с ФИПИ или РешуЕГЭ, помогу понять ошибку. Спрашивай что угодно — или начни с готового вопроса:</p>
+              <div className="ce-chips">
+                {suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    className="ce-chip"
+                    style={{ animationDelay: `${i * 60}ms` }}
+                    onClick={() => sendText(s)}
+                  >
+                    <span>{s}</span>
+                    <ArrowUpRight size={17} />
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {msgs.map((m, i) => {
-            if (m.role === 'user') return <div key={i} className="bubble me">{m.content}</div>
+            if (m.role === 'user') {
+              return (
+                <div key={i} className="msg-me">
+                  <div className="bubble me">{m.content}</div>
+                </div>
+              )
+            }
             const isLast = i === msgs.length - 1
             const html = mdToHtml(m.content) + (streaming && isLast ? '<span class="type-caret"></span>' : '')
-            return <div key={i} className="bubble ai md-body" dangerouslySetInnerHTML={{ __html: html }} />
+            return (
+              <div key={i} className="msg-ai">
+                <div className="ai-av">ν</div>
+                <div className="ai-col">
+                  <div className="bubble ai md-body" dangerouslySetInnerHTML={{ __html: html }} />
+                  {!(streaming && isLast) && (
+                    <div className="msg-tools">
+                      <button className="tool-btn" onClick={() => copyMsg(i, m.content)}>
+                        {copied === i ? (
+                          <><Check size={13} /> Скопировано</>
+                        ) : (
+                          <><Copy size={13} /> Копировать</>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
           })}
           {thinking && (
-            <div className="bubble ai">
-              <span className="typing-dots"><i /><i /><i /></span>
+            <div className="msg-ai">
+              <div className="ai-av">ν</div>
+              <div className="bubble ai thinking-bubble">
+                <span className="typing-dots"><i /><i /><i /></span>
+              </div>
             </div>
           )}
         </div>
-        <div className="row" style={{ marginTop: 12, gap: 8 }}>
+        <div className="chat-input">
           <textarea
             ref={inputRef}
-            className="input"
             rows={1}
             placeholder="Напиши вопрос…"
             value={input}
@@ -147,15 +235,21 @@ export default function Chat() {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                send()
+                sendText(input)
               }
             }}
-            style={{ resize: 'none', overflowY: 'auto' }}
           />
-          <button className="btn btn-primary" onClick={send} disabled={!input.trim() || busy} aria-label="Отправить">
-            <Send size={16} />
+          <button
+            className={'chat-send' + (streaming ? ' stop' : '')}
+            onClick={onSendClick}
+            disabled={thinking || (!streaming && !input.trim())}
+            aria-label={streaming ? 'Остановить' : 'Отправить'}
+            title={streaming ? 'Показать ответ целиком' : 'Отправить'}
+          >
+            {streaming ? <Square size={15} fill="currentColor" /> : <Send size={17} />}
           </button>
         </div>
+        <div className="chat-hint">Enter — отправить · Shift + Enter — новая строка</div>
       </div>
     </div>
   )
