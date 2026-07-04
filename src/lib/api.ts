@@ -89,8 +89,16 @@ export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider
   } catch {
     throw new Error(`${p.name} вернул не-JSON: ${text.slice(0, 200)}`)
   }
+  if (typeof parsed === 'string') {
+    // голая строка вместо JSON-объекта = сообщение об ошибке ("Api key is invalid" и т.п.)
+    throw new Error(`${p.name}: ${parsed}`)
+  }
   if (parsed?.error) {
-    throw new Error(parsed.error.message || `Ошибка ${p.name} API`)
+    throw new Error(parsed.error.message || parsed.error || `Ошибка ${p.name} API`)
+  }
+  if (!Array.isArray(parsed?.choices)) {
+    // нет choices — модель не ответила (плохой ключ, недоступная модель); не отдаём «пустоту»
+    throw new Error(String(parsed?.message || parsed?.detail || `${p.name} не вернул ответ — проверь ключ и модель`))
   }
   return parsed
 }
@@ -133,7 +141,15 @@ export async function checkApiKey(apiKey: string, provider: Provider = 'groq'): 
     }
     const parsed = await authGet(apiKey, `${p.base}/models`)
     if (parsed?.error) return { ok: false, error: parsed.error.message || 'Ошибка' }
-    return { ok: true, models: (parsed.data || []).map((m: any) => m.id) }
+    // На плохой ключ сервис может ответить голой строкой ("Api key is invalid") или объектом
+    // без массива data — это НЕ успех, иначе показывали бы «Рабочий. Моделей: 0».
+    if (!Array.isArray(parsed?.data)) {
+      const msg = typeof parsed === 'string' ? parsed : parsed?.message || 'Сервис не вернул список моделей — проверь ключ'
+      return { ok: false, error: String(msg) }
+    }
+    const ids = parsed.data.map((m: any) => m.id).filter(Boolean)
+    if (ids.length === 0) return { ok: false, error: 'Список моделей пуст — возможно, ключ без доступа к моделям' }
+    return { ok: true, models: ids }
   } catch (e: any) {
     return { ok: false, error: e?.message || 'Сеть недоступна' }
   }

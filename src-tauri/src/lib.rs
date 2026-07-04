@@ -22,10 +22,17 @@ fn allowed_api(url: &str) -> bool {
 
 /// Один HTTP-клиент на всё приложение + таймаут. Генерация плана бывает долгой (медленные
 /// бесплатные модели) — держим большой потолок, чтобы легитимный запрос не обрывался.
+///
+/// `.no_proxy()` КРИТИЧНО: по умолчанию reqwest читает системный прокси (HTTP_PROXY/HTTPS_PROXY,
+/// WinINET) и гонит через него весь трафик. VPN-клиенты прокси-типа (частый кейс в РФ) прописывают
+/// туда 127.0.0.1:порт; когда пользователь выключает VPN для теста, этот прокси мёртв/кривой —
+/// запрос ломается или возвращает мусор («Api key is invalid» → «0 моделей», пустой ответ).
+/// Выбранные провайдеры доступны из РФ НАПРЯМУЮ, поэтому всегда идём в обход прокси.
 fn http() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
+            .no_proxy()
             .timeout(Duration::from_secs(150))
             .connect_timeout(Duration::from_secs(15))
             .build()
