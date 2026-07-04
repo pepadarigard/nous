@@ -144,22 +144,33 @@ export function cleanMath(input: string, gentle = false): string {
   return s.trim()
 }
 
+// Терпимый разбор JSON от разных ИИ: убирает «заборы» ```json, BOM, висячие запятые,
+// «умные» кавычки; вырезает JSON из прозы. { … } и [ … ] на верхнем уровне.
+function tryParse(raw: string): any | null {
+  const variants = [raw, raw.replace(/,\s*([}\]])/g, '$1')] // без висячих запятых
+  for (const v of variants) {
+    try {
+      return JSON.parse(v)
+    } catch {
+      /* следующий вариант */
+    }
+  }
+  return null
+}
 function extractJson(text: string): any {
-  let t = (text || '').trim()
+  let t = (text || '').replace(/^﻿/, '').trim()
+  t = t.replace(/[“”]/g, '"').replace(/[‘’]/g, "'") // умные кавычки → обычные
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i)
   if (fence) t = fence[1].trim()
-  try {
-    return JSON.parse(t)
-  } catch {
-    /* пробуем вырезать */
-  }
-  const s = t.indexOf('{')
-  const e = t.lastIndexOf('}')
-  if (s !== -1 && e > s) {
-    try {
-      return JSON.parse(t.slice(s, e + 1))
-    } catch {
-      /* всё */
+  const direct = tryParse(t)
+  if (direct) return Array.isArray(direct) ? { blocks: direct } : direct
+  // вырезаем самый внешний { … } или [ … ]
+  for (const [open, close] of [['{', '}'], ['[', ']']] as const) {
+    const s = t.indexOf(open)
+    const e = t.lastIndexOf(close)
+    if (s !== -1 && e > s) {
+      const parsed = tryParse(t.slice(s, e + 1))
+      if (parsed) return Array.isArray(parsed) ? { blocks: parsed } : parsed
     }
   }
   throw new Error('Не удалось разобрать JSON')
@@ -347,9 +358,65 @@ export async function importPlan(cfg: AppConfig, text: string, onProgress?: (m: 
   return { blocks, subjects, overview: cleanMath(String(data?.overview || 'Твой план подготовки.')) }
 }
 
+/** Один предмет → блоки (с запасной, более короткой попыткой). Отдельно, чтобы гонять предметы параллельно. */
+async function generateSubject(cfg: AppConfig, input: PromptInput, sid: string, today: string, weeks: number): Promise<Block[]> {
+  const name = subjectName(sid)
+  const g = input.goals.find((x) => x.subjectId === sid)
+  const s = input.schedules.find((x) => x.subjectId === sid)
+  const daysN = s?.days?.length || 5
+  // Держим предмет компактным (≤~45 занятий, ≤3500 токенов), чтобы запрос был БЫСТРЫМ. Больше — «Дописать план».
+  const target = Math.max(24, Math.min(45, daysN * weeks))
+  const spec = egeSpec(sid)
+  let data: any = null
+  try {
+    data = await callJSON(cfg, {
+      system:
+        `Ты — опытный методист ЕГЭ ${EGE_YEAR}. Составляешь план подготовки по предмету в строгом JSON. ` +
+        'Отвечай ТОЛЬКО валидным JSON без пояснений и без рассуждений. ' + MATH_RULE,
+      user: [
+        `Предмет: ${name}. Ученик: сейчас ~${g?.current ?? '?'} баллов, цель ${g?.target ?? '?'}. Сегодня ${today}, экзамен ЕГЭ ${EGE_YEAR}${input.examDate ? ` (${input.examDate})` : ''}, впереди ≈${weeks} недель, занятий в неделю: ${daysN}.`,
+        input.notes ? `Пожелания ученика: ${input.notes}` : '',
+        spec ? `\nСТРУКТУРА ЭКЗАМЕНА:\n${spec}` : '',
+        '\nЭТАПЫ по порядку: 1) фундамент; 2) все темы кодификатора от простого к сложному; 3) сложные задания (вторая часть); 4) финиш — повторение и пробники.',
+        `\nСДЕЛАЙ ≈${target} занятий (блоки по 5–7). Практика — конкретно: "реши 15–20 заданий №N по теме … на РешуЕГЭ/ФИПИ"; описания короткие и по делу. Регулярно kind="review" с возвратом к пройденному.`,
+        `\nJSON-схема: {"blocks":[{"subjectId":"${sid}","title":"тема блока","goal":"цель","lessons":[{"title":"...","kind":"theory|practice|review","description":"..."}]}]}`,
+      ].filter(Boolean).join('\n'),
+      temperature: 0.35,
+      maxTokens: 3500,
+    })
+  } catch {
+    // Запасная попытка: короче, меньше токенов — надёжнее на лимитах и медленных моделях.
+    try {
+      data = await callJSON(cfg, {
+        system: `Ты методист ЕГЭ ${EGE_YEAR}. Отвечай только валидным JSON, без рассуждений. ` + MATH_RULE,
+        user:
+          `План подготовки: ${name}, с ${g?.current ?? '?'} до ${g?.target ?? '?'} баллов, ≈${Math.min(30, target)} занятий (блоки по 5–6).\n` +
+          (spec ? `СТРУКТУРА:\n${spec}\n` : '') +
+          'Практика — конкретно (что и где решать). Регулярно kind="review".' +
+          `\nСхема: {"blocks":[{"subjectId":"${sid}","title":"...","goal":"...","lessons":[{"title":"...","kind":"theory|practice|review","description":"..."}]}]}`,
+        temperature: 0.3,
+        maxTokens: 2600,
+      })
+    } catch {
+      data = null
+    }
+  }
+  return ((data?.blocks || []) as any[])
+    .filter((b: any) => b && (b.title || b.lessons))
+    .map((b: any) => ({
+      id: uid('blk_'),
+      subjectId: sid, // предмет фиксируем сами — модели иногда путают id
+      title: cleanMath(String(b.title || 'Блок')),
+      goal: cleanMath(String(b.goal || '')),
+      order: 0,
+      lessons: coerceLessons(b.lessons || []),
+    }))
+    .filter((b) => b.lessons.length > 0)
+}
+
 /**
- * Генерация плана ПРЯМО В ПРИЛОЖЕНИИ (без внешнего ИИ): по каждому предмету — отдельный запрос
- * к умной модели на ключе ученика, со спецификацией ЕГЭ и требованиями к качеству занятий.
+ * Генерация плана ПРЯМО В ПРИЛОЖЕНИИ (без внешнего ИИ). Предметы генерируются ПАРАЛЛЕЛЬНО —
+ * общее время ≈ времени одного предмета, а не суммы (главное ускорение).
  */
 export async function generatePlanInApp(cfg: AppConfig, input: PromptInput, onProgress?: (m: string) => void): Promise<ImportResult> {
   if (useMock()) {
@@ -362,75 +429,22 @@ export async function generatePlanInApp(cfg: AppConfig, input: PromptInput, onPr
   }
   const today = new Date().toISOString().slice(0, 10)
   const weeks = weeksUntil(input.examDate)
+  const names = input.subjects.map(subjectName).join(', ')
+  onProgress?.(`ИИ составляет план: ${names}. Обычно до минуты, дольше на бесплатных моделях…`)
+
+  // Все предметы одновременно; сохраняем порядок предметов.
+  const perSubject = await Promise.all(
+    input.subjects.map((sid) => generateSubject(cfg, input, sid, today, weeks).catch(() => [] as Block[])),
+  )
   const allBlocks: Block[] = []
   let order = 0
-  for (let i = 0; i < input.subjects.length; i++) {
-    const sid = input.subjects[i]
-    const name = subjectName(sid)
-    onProgress?.(`Генерирую: ${name} (${i + 1} из ${input.subjects.length})…`)
-    const g = input.goals.find((x) => x.subjectId === sid)
-    const s = input.schedules.find((x) => x.subjectId === sid)
-    const daysN = s?.days?.length || 5
-    // Потолок ниже, чем у внешнего ИИ: длинный JSON в одном ответе рвётся. Остальное — «Дописать план».
-    const target = Math.max(30, Math.min(70, daysN * weeks))
-    const spec = egeSpec(sid)
-    let data: any = null
-    try {
-      data = await callJSON(cfg, {
-        system:
-          `Ты — опытный методист ЕГЭ ${EGE_YEAR}. Составляешь план подготовки по предмету в строгом JSON. ` +
-          'Отвечай ТОЛЬКО валидным JSON без пояснений. ' + MATH_RULE,
-        user: [
-          `Предмет: ${name}. Ученик: сейчас ~${g?.current ?? '?'} баллов, цель ${g?.target ?? '?'}. Сегодня ${today}, экзамен ЕГЭ ${EGE_YEAR}${input.examDate ? ` (${input.examDate})` : ''}, впереди ≈${weeks} недель, занятий в неделю: ${daysN}.`,
-          input.notes ? `Пожелания ученика: ${input.notes}` : '',
-          spec ? `\nСТРУКТУРА ЭКЗАМЕНА:\n${spec}` : '',
-          `\nМЕТОДИКА:\n${REFERENCE_METHODOLOGY}`,
-          '\nЭТАПЫ по порядку: 1) фундамент; 2) все темы кодификатора от простого к сложному; 3) сложные задания (вторая часть); 4) финиш — повторение слабых мест и полные пробники.',
-          `\nСДЕЛАЙ ≈${target} занятий (блоки по 5–8 занятий). Требования:`,
-          LESSON_QUALITY,
-          '- Регулярно вставляй kind="review" с возвратом к конкретным пройденным темам.',
-          `\nJSON-схема: {"blocks":[{"subjectId":"${sid}","title":"тема блока","goal":"цель","lessons":[{"title":"...","kind":"theory|practice|review","description":"..."}]}]}`,
-        ].filter(Boolean).join('\n'),
-        temperature: 0.35,
-        maxTokens: 5000,
-      })
-    } catch {
-      // Запасная попытка: короче план, меньше токенов — надёжнее на лимитах.
-      onProgress?.(`Ещё раз, компактнее: ${name}…`)
-      try {
-        data = await callJSON(cfg, {
-          system: `Ты методист ЕГЭ ${EGE_YEAR}. Отвечай только валидным JSON. ` + MATH_RULE,
-          user:
-            `План подготовки: ${name}, с ${g?.current ?? '?'} до ${g?.target ?? '?'} баллов, ≈${Math.min(40, target)} занятий (блоки по 5–6).\n` +
-            (spec ? `СТРУКТУРА:\n${spec}\n` : '') +
-            LESSON_QUALITY +
-            `\nСхема: {"blocks":[{"subjectId":"${sid}","title":"...","goal":"...","lessons":[{"title":"...","kind":"theory|practice|review","description":"..."}]}]}`,
-          temperature: 0.3,
-          maxTokens: 3800,
-        })
-      } catch {
-        data = null
-      }
-    }
-    const blocks: Block[] = ((data?.blocks || []) as any[])
-      .filter((b: any) => b && (b.title || b.lessons))
-      .map((b: any) => ({
-        id: uid('blk_'),
-        subjectId: sid, // предмет фиксируем сами — модели иногда путают id
-        title: cleanMath(String(b.title || 'Блок')),
-        goal: cleanMath(String(b.goal || '')),
-        order: order++,
-        lessons: coerceLessons(b.lessons || []),
-      }))
-      .filter((b) => b.lessons.length > 0)
-    allBlocks.push(...blocks)
-    if (i < input.subjects.length - 1) await sleep(1500) // бережём rate-limit между предметами
-  }
-  if (!allBlocks.length) throw new Error('ИИ не вернул план. Попробуй ещё раз или используй путь через ChatGPT.')
-  const names = [...new Set(allBlocks.map((b) => b.subjectId))]
+  for (const blocks of perSubject) for (const b of blocks) allBlocks.push({ ...b, order: order++ })
+
+  if (!allBlocks.length) throw new Error('Модель не вернула план (возможно, она перегружена или не подходит). Попробуй ещё раз, смени модель/провайдера в Настройках или вставь план от ChatGPT.')
+  const subjects = [...new Set(allBlocks.map((b) => b.subjectId))]
   return {
     blocks: allBlocks,
-    subjects: names,
+    subjects,
     overview: `План подготовки к ЕГЭ ${EGE_YEAR}: сначала фундамент, затем все темы кодификатора и финишное повторение с пробниками.`,
   }
 }

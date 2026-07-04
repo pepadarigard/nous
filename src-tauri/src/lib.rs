@@ -20,12 +20,13 @@ fn allowed_api(url: &str) -> bool {
     ALLOWED.iter().any(|a| url.starts_with(a)) || url.starts_with("https://models.github.ai/")
 }
 
-/// Один HTTP-клиент на всё приложение + таймаут, чтобы запрос не завис навсегда.
+/// Один HTTP-клиент на всё приложение + таймаут. Генерация плана бывает долгой (медленные
+/// бесплатные модели) — держим большой потолок, чтобы легитимный запрос не обрывался.
 fn http() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .timeout(Duration::from_secs(75))
+            .timeout(Duration::from_secs(150))
             .connect_timeout(Duration::from_secs(15))
             .build()
             .expect("reqwest client")

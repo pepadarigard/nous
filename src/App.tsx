@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useStore } from './store'
 import { checkApiKey } from './lib/api'
-import { modelScore, pickBestModel } from './lib/models'
+import { isBadModel, modelScore, pickBestModel } from './lib/models'
 import { activeKey } from './lib/providers'
 import Layout from './ui/Layout'
 import Onboarding from './screens/Onboarding'
@@ -28,12 +28,14 @@ export default function App() {
     if (!loaded) return
     const { config } = useStore.getState().data
     const key = activeKey(config)
-    if (!key || config.modelAutoPicked) return
+    // Перевыбираем, если ещё не подбирали ИЛИ сохранена «плохая» модель (кодовая/reasoning — их раньше могли выбрать).
+    const needPick = !config.modelAutoPicked || isBadModel(config.textModel)
+    if (!key || !needPick) return
     checkApiKey(key, config.provider ?? 'groq').then((r) => {
       if (!r.ok || !r.models?.length) return // сеть/ключ подведёт — попробуем при следующем запуске
       const best = pickBestModel(r.models, config.provider)
       const setConfig = useStore.getState().setConfig
-      if (best && modelScore(best) > modelScore(config.textModel)) {
+      if (best && (isBadModel(config.textModel) || modelScore(best) > modelScore(config.textModel))) {
         setConfig({ textModel: best, modelAutoPicked: true })
       } else {
         setConfig({ modelAutoPicked: true })
