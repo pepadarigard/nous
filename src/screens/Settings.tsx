@@ -106,9 +106,13 @@ export default function Settings() {
   const smarter = best && modelScore(best) > modelScore(textModel) ? best : null
 
   function save() {
-    // ключи текущей формы — поверх конфига (extraKeys собираются keyPatch'ем по одному)
+    // Ключи текущей формы — поверх конфига. ВАЖНО: пустое поле формы НЕ затирает сохранённый
+    // ключ (форма могла инициализироваться до загрузки состояния); осознанно очистить можно
+    // только ключ ВЫБРАННОГО провайдера.
     let cfg = useStore.getState().data.config
-    for (const p of PROVIDER_ORDER) cfg = { ...cfg, ...keyPatch(cfg, p, keys[p]) }
+    for (const p of PROVIDER_ORDER) {
+      if (keys[p] || p === prov) cfg = { ...cfg, ...keyPatch(cfg, p, keys[p]) }
+    }
     setConfig({ ...cfg, provider: prov, textModel })
     setSaved(true)
     setTimeout(() => setSaved(false), 1600)

@@ -4,7 +4,7 @@
 //  3) отвечает в чате (tutorChat).
 
 import type { AppConfig, Block, Lesson, StudyPlan, SubjectGoal, SubjectSchedule } from '../types'
-import { groqRaw, isTauri, uid, type GroqBody } from './api'
+import { groqRaw, llmStream, isTauri, uid, type GroqBody } from './api'
 import { activeKey } from './providers'
 import { SUBJECTS, subjectName, WEEKDAYS } from '../data/subjects'
 import { EGE_YEAR, egeSpec } from '../data/ege2027'
@@ -526,36 +526,77 @@ const EGE_FACTS = `
 - По другим предметам: если не помнишь точную структуру или номер задания — НЕ называй конкретных номеров.
 `.trim()
 
+/** Системный промт репетитора (общий для обычного и стримингового чата). */
+function tutorSystem(studentCtx?: string): string {
+  return (
+    'Ты — опытный репетитор по подготовке к ЕГЭ (Россия). Объясняешь по-русски, по шагам, конкретно и по делу.\n\n' +
+    'ЧЕСТНОСТЬ — ГЛАВНОЕ ПРАВИЛО:\n' +
+    '- НИКОГДА не выдумывай: правила языка, примеры слов, номера заданий, баллы, названия книг, ссылки.\n' +
+    '- Приводи пример, только если на 100% уверен, что он верный. Сомневаешься — не приводи вовсе.\n' +
+    '- Если не знаешь точно — прямо скажи «не уверен» и посоветуй проверить на ФИПИ или в учебнике.\n' +
+    '- Лучше короткий точный ответ, чем длинный с ошибками. Никакой «воды» и дежурной мотивации.\n\n' +
+    EGE_FACTS + '\n\n' +
+    'КАК ОТВЕЧАТЬ:\n' +
+    '- КРАТКО и по делу: обычно 4–8 предложений или короткий список. Не растекайся, без вступлений и воды. Разворачивай подробно, только если ученик прямо просит «подробнее»/«по шагам».\n' +
+    '- Разбор задания: сначала краткий алгоритм, потом короткий пример решения.\n' +
+    '- Практику советуй на реальных площадках: РешуЕГЭ/СдамГИА, открытый банк ФИПИ, для информатики — kompege.ru.\n' +
+    '- Оформляй в Markdown: подзаголовки (##), списки (- ), жирный (**важное**). ' + MATH_RULE +
+    (studentCtx ? `\n\nТвой ученик: ${studentCtx}. Учитывай его предметы и уровень.` : '')
+  )
+}
+
 /** Чат-репетитор. studentCtx — краткая справка об ученике (предметы, баллы, цели), чтобы отвечать точнее. */
 export async function tutorChat(cfg: AppConfig, messages: { role: string; content: string }[], studentCtx?: string): Promise<string> {
   if (useMock()) return 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
   const resp = await groqRawRetry(cfg, {
     model: cfg.textModel,
-    messages: [
-      {
-        role: 'system',
-        content:
-          'Ты — опытный репетитор по подготовке к ЕГЭ (Россия). Объясняешь по-русски, по шагам, конкретно и по делу.\n\n' +
-          'ЧЕСТНОСТЬ — ГЛАВНОЕ ПРАВИЛО:\n' +
-          '- НИКОГДА не выдумывай: правила языка, примеры слов, номера заданий, баллы, названия книг, ссылки.\n' +
-          '- Приводи пример, только если на 100% уверен, что он верный. Сомневаешься — не приводи вовсе.\n' +
-          '- Если не знаешь точно — прямо скажи «не уверен» и посоветуй проверить на ФИПИ или в учебнике.\n' +
-          '- Лучше короткий точный ответ, чем длинный с ошибками. Никакой «воды» и дежурной мотивации.\n\n' +
-          EGE_FACTS + '\n\n' +
-          'КАК ОТВЕЧАТЬ:\n' +
-          '- КРАТКО и по делу: обычно 4–8 предложений или короткий список. Не растекайся, без вступлений и воды. Разворачивай подробно, только если ученик прямо просит «подробнее»/«по шагам».\n' +
-          '- Разбор задания: сначала краткий алгоритм, потом короткий пример решения.\n' +
-          '- Практику советуй на реальных площадках: РешуЕГЭ/СдамГИА, открытый банк ФИПИ, для информатики — kompege.ru.\n' +
-          '- Оформляй в Markdown: подзаголовки (##), списки (- ), жирный (**важное**). ' + MATH_RULE +
-          (studentCtx ? `\n\nТвой ученик: ${studentCtx}. Учитывай его предметы и уровень.` : ''),
-      },
-      ...messages,
-    ],
+    messages: [{ role: 'system', content: tutorSystem(studentCtx) }, ...messages],
     temperature: 0.4,
     max_tokens: 1400,
     reasoning_format: 'hidden',
   })
   return cleanMath(resp?.choices?.[0]?.message?.content ?? '', true)
+}
+
+/**
+ * Стриминговый чат-репетитор: onDelta получает текст по мере генерации (ответ виден сразу).
+ * Если стрим не задался вовсе — тихо откатываемся на обычный запрос (там есть ретраи на 429).
+ * Возвращает полный очищенный ответ.
+ */
+export async function tutorChatStream(
+  cfg: AppConfig,
+  messages: { role: string; content: string }[],
+  studentCtx: string | undefined,
+  onDelta: (chunk: string) => void,
+): Promise<string> {
+  if (useMock()) {
+    const demo = 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
+    onDelta(demo)
+    return demo
+  }
+  let acc = ''
+  try {
+    const full = await llmStream(
+      activeKey(cfg),
+      {
+        model: cfg.textModel,
+        messages: [{ role: 'system', content: tutorSystem(studentCtx) }, ...messages],
+        temperature: 0.4,
+        max_tokens: 1400,
+        reasoning_format: 'hidden',
+        stream: true,
+      },
+      cfg.provider ?? 'groq',
+      (c) => {
+        acc += c
+        onDelta(c)
+      },
+    )
+    return cleanMath(full, true)
+  } catch (e) {
+    if (acc) return cleanMath(acc, true) // стрим оборвался на середине — отдаём, что успели
+    return await tutorChat(cfg, messages, studentCtx)
+  }
 }
 
 /**

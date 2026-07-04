@@ -16,6 +16,28 @@ function handleLinkClick(e: React.MouseEvent) {
   }
 }
 
+// Живые фразы ожидания: показываются, пока модель ещё не начала отвечать.
+const THINK_PHRASES = [
+  'Думаю…',
+  'Прикидываю, как объяснить проще…',
+  'Подбираю пример…',
+  'Формулирую по шагам…',
+  'Проверяю, чтобы без ошибок…',
+]
+function ThinkingStatus() {
+  const [i, setI] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setI((v) => v + 1), 2400)
+    return () => clearInterval(t)
+  }, [])
+  return (
+    <span className="think-row">
+      <span className="typing-dots"><i /><i /><i /></span>
+      <span key={i} className="think-text">{THINK_PHRASES[i % THINK_PHRASES.length]}</span>
+    </span>
+  )
+}
+
 // Готовые подсказки на пустом экране — под предметы ученика, чтобы можно было начать в один клик.
 const SUBJECT_HINTS: Record<string, string> = {
   russian: 'Объясни, как писать сочинение (задание 27) по русскому',
@@ -127,29 +149,34 @@ export default function Chat() {
                 </div>
               )
             }
+            // Последний ответ при активном запросе — это живой стрим: каретка вместо кнопок.
+            const live = busy && i === msgs.length - 1
+            const html = mdToHtml(m.content) + (live ? '<span class="type-caret"></span>' : '')
             return (
               <div key={i} className="msg-ai">
                 <div className="ai-av">ν</div>
                 <div className="ai-col">
-                  <div className="bubble ai md-body" dangerouslySetInnerHTML={{ __html: mdToHtml(m.content) }} />
-                  <div className="msg-tools">
-                    <button className="tool-btn" onClick={() => copyMsg(i, m.content)}>
-                      {copied === i ? (
-                        <><Check size={13} /> Скопировано</>
-                      ) : (
-                        <><Copy size={13} /> Копировать</>
-                      )}
-                    </button>
-                  </div>
+                  <div className="bubble ai md-body" dangerouslySetInnerHTML={{ __html: html }} />
+                  {!live && (
+                    <div className="msg-tools">
+                      <button className="tool-btn" onClick={() => copyMsg(i, m.content)}>
+                        {copied === i ? (
+                          <><Check size={13} /> Скопировано</>
+                        ) : (
+                          <><Copy size={13} /> Копировать</>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )
           })}
-          {busy && (
+          {busy && msgs[msgs.length - 1]?.role === 'user' && (
             <div className="msg-ai">
               <div className="ai-av">ν</div>
               <div className="bubble ai thinking-bubble">
-                <span className="typing-dots"><i /><i /><i /></span>
+                <ThinkingStatus />
               </div>
             </div>
           )}

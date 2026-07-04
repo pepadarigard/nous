@@ -47,6 +47,27 @@ export interface GroqBody {
   max_tokens?: number
   response_format?: { type: string }
   reasoning_format?: string
+  stream?: boolean
+}
+
+/** Подгонка тела под провайдера — общая для обычного и стримингового запросов. */
+function prepPayload(prov: Provider, body: GroqBody): Record<string, unknown> {
+  const payload: Record<string, unknown> = { ...body }
+  if (prov !== 'groq') delete payload.reasoning_format // параметр только Groq — другие провайдеры его не знают
+  // Гибридно-рассуждающие модели (DeepSeek V4, Qwen3, GLM) без этого флага сначала ДОЛГО
+  // «думают» (reasoning_content) и только потом отвечают — чат ощущается зависшим.
+  // Проверено живым запросом: с флагом первое слово приходит через ~1–2 секунды.
+  if (prov === 'siliconflow') payload.enable_thinking = false
+  if (prov === 'zhipu') payload.thinking = { type: 'disabled' }
+  if (prov === 'openrouter') {
+    // Бесплатные модели часто перегружены (429 upstream) — даём OpenRouter цепочку запасных,
+    // он сам переключится. Формат: массив `models` ВМЕСТО одиночного `model`.
+    // ВАЖНО: OpenRouter принимает МАКСИМУМ 3 модели в массиве (больше → ошибка 400).
+    const chain = [body.model, ...OR_FALLBACK_MODELS.filter((m) => m !== body.model)].slice(0, 3)
+    payload.models = chain
+    delete payload.model
+  }
+  return payload
 }
 
 /**
@@ -56,16 +77,8 @@ export interface GroqBody {
 export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider = 'groq'): Promise<any> {
   const prov = normProvider(provider)
   const p = PROVIDERS[prov]
-  const payload: Record<string, unknown> = { ...body }
-  if (prov !== 'groq') delete payload.reasoning_format // параметр только Groq — другие провайдеры его не знают
-  if (prov === 'openrouter') {
-    // Бесплатные модели часто перегружены (429 upstream) — даём OpenRouter цепочку запасных,
-    // он сам переключится. Формат: массив `models` ВМЕСТО одиночного `model`.
-    // ВАЖНО: OpenRouter принимает МАКСИМУМ 3 модели в массиве (больше → ошибка 400).
-    const chain = [body.model, ...OR_FALLBACK_MODELS.filter((m) => m !== body.model)].slice(0, 3)
-    payload.models = chain
-    delete payload.model
-  }
+  const payload = prepPayload(prov, body)
+  delete payload.stream // этот путь всегда без стрима — иначе в ответ приедет SSE вместо JSON
   const bodyStr = JSON.stringify(payload)
   let text: string
   if (isTauri) {
@@ -101,6 +114,39 @@ export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider
     throw new Error(String(parsed?.message || parsed?.detail || `${p.name} не вернул ответ — проверь ключ и модель`))
   }
   return parsed
+}
+
+/**
+ * Стриминговый запрос: onChunk получает куски текста ПО МЕРЕ генерации — ответ виден сразу.
+ * В Tauri — SSE через Rust; в браузере стрима нет, обычный запрос одним куском (для разработки).
+ * Возвращает полный собранный текст.
+ */
+export async function llmStream(
+  apiKey: string,
+  body: GroqBody,
+  provider: Provider,
+  onChunk: (s: string) => void,
+): Promise<string> {
+  const prov = normProvider(provider)
+  const p = PROVIDERS[prov]
+  if (isTauri) {
+    const core = await import('@tauri-apps/api/core')
+    const ch = new core.Channel<string>()
+    ch.onmessage = (s) => onChunk(s)
+    const payload = prepPayload(prov, { ...body, stream: true })
+    return await core.invoke<string>('llm_stream', {
+      apiKey,
+      body: JSON.stringify(payload),
+      base: p.base,
+      onChunk: ch,
+    })
+  }
+  const noStream = { ...body }
+  delete noStream.stream
+  const resp = await groqRaw(apiKey, noStream, prov)
+  const text: string = resp?.choices?.[0]?.message?.content ?? ''
+  if (text) onChunk(text)
+  return text
 }
 
 /** GET с авторизацией к провайдеру (список моделей, проверка ключа). Возвращает распарсенный JSON. */

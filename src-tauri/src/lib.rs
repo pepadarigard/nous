@@ -103,6 +103,92 @@ async fn llm_request(api_key: String, body: String, base: String) -> Result<Stri
     resp.text().await.map_err(|e| e.to_string())
 }
 
+/// Стриминговый запрос к провайдеру (SSE, `"stream": true` в теле): куски текста уходят
+/// на фронт через Channel ПО МЕРЕ генерации — ответ виден сразу, а не после полной генерации.
+/// Возвращает собранный полный текст.
+#[tauri::command]
+async fn llm_stream(
+    api_key: String,
+    body: String,
+    base: String,
+    on_chunk: tauri::ipc::Channel<String>,
+) -> Result<String, String> {
+    use futures_util::StreamExt;
+    let url = format!("{}/chat/completions", base.trim_end_matches('/'));
+    if !allowed_api(&url) {
+        return Err("Недопустимый адрес сервиса ИИ".into());
+    }
+    let resp = http()
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .header("Accept", "text/event-stream")
+        .header("X-Title", "Nous")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let code = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+        // Из JSON-ошибки достаём человеческое сообщение, иначе шлём начало тела как есть.
+        let msg = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| {
+                v["error"]["message"]
+                    .as_str()
+                    .or_else(|| v["message"].as_str())
+                    .map(String::from)
+            })
+            .unwrap_or_else(|| text.chars().take(300).collect());
+        return Err(format!("HTTP {}: {}", code, msg));
+    }
+    let mut full = String::new();
+    let mut other = String::new(); // не-SSE строки: тело ошибки, пришедшее с кодом 200
+    let mut buf: Vec<u8> = Vec::new(); // байтовый буфер: чанк может разрезать UTF-8 символ
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        buf.extend_from_slice(&chunk);
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&line_bytes);
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Some(data) = line.strip_prefix("data:") {
+                let data = data.trim();
+                if data == "[DONE]" {
+                    continue;
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(err) = v["error"]["message"].as_str() {
+                        return Err(err.to_string());
+                    }
+                    if let Some(delta) = v["choices"][0]["delta"]["content"].as_str() {
+                        if !delta.is_empty() {
+                            full.push_str(delta);
+                            let _ = on_chunk.send(delta.to_string());
+                        }
+                    }
+                }
+            } else if other.len() < 500 {
+                other.push_str(line);
+                other.push(' ');
+            }
+        }
+    }
+    if full.is_empty() {
+        let msg = other.trim();
+        if msg.is_empty() {
+            return Err("Пустой ответ от сервиса ИИ".into());
+        }
+        return Err(msg.chars().take(300).collect());
+    }
+    Ok(full)
+}
+
 /// GET с авторизацией к провайдеру (список моделей, проверка ключа).
 #[tauri::command]
 async fn llm_get(api_key: String, url: String) -> Result<String, String> {
@@ -174,6 +260,7 @@ pub fn run() {
             load_state,
             save_state,
             llm_request,
+            llm_stream,
             llm_get,
             github_latest,
             export_state,

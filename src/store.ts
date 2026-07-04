@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { AppConfig, AppData, Block, ProgressEvent, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
 import { emptyData } from './types'
 import { loadState, saveState, uid, humanError } from './lib/api'
-import { tutorChat } from './lib/ai'
+import { tutorChatStream } from './lib/ai'
 import { subjectName } from './data/subjects'
 import { computeStats, type Celebration } from './lib/stats'
 
@@ -163,6 +163,7 @@ export const useStore = create<Store>((set, get) => {
 
     // Запрос к репетитору живёт В СТОРЕ, а не в компоненте чата: пользователь может уйти
     // на другую вкладку — ответ всё равно дойдёт и ляжет в chatMsgs, а не потеряется.
+    // Ответ СТРИМИТСЯ: текст появляется в переписке по мере генерации (батчим ~15 обновл./с).
     sendChat: async (text) => {
       const q = text.trim()
       const s0 = get()
@@ -170,6 +171,12 @@ export const useStore = create<Store>((set, get) => {
       const base: ChatMsg[] = [...s0.chatMsgs, { role: 'user', content: q }]
       set({ chatMsgs: base, chatBusy: true })
       let ans = ''
+      let acc = ''
+      let flushTimer: ReturnType<typeof setTimeout> | null = null
+      const flush = () => {
+        flushTimer = null
+        set({ chatMsgs: [...base, { role: 'assistant', content: acc }] })
+      }
       try {
         const d = get().data
         // Краткая справка об ученике — чтобы репетитор отвечал в контексте его предметов и целей.
@@ -181,16 +188,32 @@ export const useStore = create<Store>((set, get) => {
           }),
           d.examDate ? `экзамен ${d.examDate}` : '',
         ].filter(Boolean).join('; ')
-        const a = await tutorChat(d.config, base.slice(-CHAT_CONTEXT).map((m) => ({ role: m.role, content: m.content })), ctx)
+        const a = await tutorChatStream(
+          d.config,
+          base.slice(-CHAT_CONTEXT).map((m) => ({ role: m.role, content: m.content })),
+          ctx,
+          (delta) => {
+            acc += delta
+            if (!flushTimer) flushTimer = setTimeout(flush, 60)
+          },
+        )
         ans = a || 'Пустой ответ.'
       } catch (e) {
         ans = '⚠️ ' + humanError(e)
       }
+      if (flushTimer) clearTimeout(flushTimer)
       set({ chatMsgs: [...base, { role: 'assistant', content: ans }], chatBusy: false })
     },
     clearChat: () => set({ chatMsgs: [], chatBusy: false }),
 
     finishOnboarding: () => commit((d) => ({ ...d, onboarded: true })),
-    resetAll: () => commit(() => emptyData()),
+    // Сброс стирает план/прогресс/предметы, но СОХРАНЯЕТ ключи и настройки ИИ —
+    // терять с трудом добытые ключи из-за «начать заново» слишком обидно.
+    resetAll: () =>
+      commit((d) => {
+        const fresh = emptyData()
+        fresh.config = { ...fresh.config, ...d.config }
+        return fresh
+      }),
   }
 })
