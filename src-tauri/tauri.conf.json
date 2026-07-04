@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Nous",
   "mainBinaryName": "Nous",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "identifier": "com.egeplan.desktop",
   "build": {
     "frontendDist": "../dist",
