@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import type { AppConfig, AppData, Block, ProgressEvent, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
 import { emptyData } from './types'
-import { loadState, saveState, uid } from './lib/api'
+import { loadState, saveState, uid, humanError } from './lib/api'
+import { tutorChat } from './lib/ai'
+import { subjectName } from './data/subjects'
 import { computeStats, type Celebration } from './lib/stats'
 
 export interface ChatMsg {
@@ -9,12 +11,16 @@ export interface ChatMsg {
   content: string
 }
 
+// В модель шлём только хвост истории — иначе долгий чат упирается в лимиты контекста.
+const CHAT_CONTEXT = 12
+
 interface Store {
   loaded: boolean
   data: AppData
   planStatus: string
   celebrations: Celebration[]
   chatMsgs: ChatMsg[] // живёт в памяти сессии — чат не теряется при переходах между экранами
+  chatBusy: boolean // запрос к ИИ в полёте; в сторе — чтобы доживал при уходе со вкладки
 
   init: () => Promise<void>
   setPlanStatus: (s: string) => void
@@ -34,6 +40,7 @@ interface Store {
   toggleLesson: (blockId: string, lessonId: string) => void
   dismissCelebration: (id: string) => void
   setChatMsgs: (msgs: ChatMsg[]) => void
+  sendChat: (text: string) => Promise<void>
   clearChat: () => void
 
   finishOnboarding: () => void
@@ -56,6 +63,7 @@ export const useStore = create<Store>((set, get) => {
     planStatus: '',
     celebrations: [],
     chatMsgs: [],
+    chatBusy: false,
 
     init: async () => {
       const saved = await loadState()
@@ -152,7 +160,35 @@ export const useStore = create<Store>((set, get) => {
     },
     dismissCelebration: (id) => set({ celebrations: get().celebrations.filter((c) => c.id !== id) }),
     setChatMsgs: (msgs) => set({ chatMsgs: msgs }),
-    clearChat: () => set({ chatMsgs: [] }),
+
+    // Запрос к репетитору живёт В СТОРЕ, а не в компоненте чата: пользователь может уйти
+    // на другую вкладку — ответ всё равно дойдёт и ляжет в chatMsgs, а не потеряется.
+    sendChat: async (text) => {
+      const q = text.trim()
+      const s0 = get()
+      if (!q || s0.chatBusy) return
+      const base: ChatMsg[] = [...s0.chatMsgs, { role: 'user', content: q }]
+      set({ chatMsgs: base, chatBusy: true })
+      let ans = ''
+      try {
+        const d = get().data
+        // Краткая справка об ученике — чтобы репетитор отвечал в контексте его предметов и целей.
+        const ctx = [
+          d.studentName ? `имя ${d.studentName}` : '',
+          ...d.subjects.map((id) => {
+            const g = d.goals.find((x) => x.subjectId === id)
+            return `${subjectName(id)} (${g ? `сейчас ~${g.current}, цель ${g.target}` : 'баллы не указаны'})`
+          }),
+          d.examDate ? `экзамен ${d.examDate}` : '',
+        ].filter(Boolean).join('; ')
+        const a = await tutorChat(d.config, base.slice(-CHAT_CONTEXT).map((m) => ({ role: m.role, content: m.content })), ctx)
+        ans = a || 'Пустой ответ.'
+      } catch (e) {
+        ans = '⚠️ ' + humanError(e)
+      }
+      set({ chatMsgs: [...base, { role: 'assistant', content: ans }], chatBusy: false })
+    },
+    clearChat: () => set({ chatMsgs: [], chatBusy: false }),
 
     finishOnboarding: () => commit((d) => ({ ...d, onboarded: true })),
     resetAll: () => commit(() => emptyData()),
