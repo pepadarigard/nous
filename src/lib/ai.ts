@@ -29,7 +29,7 @@ async function groqRawRetry(cfg: AppConfig, body: GroqBody): Promise<any> {
   let last: unknown
   for (let i = 0; i < 3; i++) {
     try {
-      return await groqRaw(activeKey(cfg), body, cfg.provider ?? 'groq', { folder: cfg.yandexFolder })
+      return await groqRaw(activeKey(cfg), body, cfg.provider ?? 'groq')
     } catch (e) {
       last = e
       if (isRateLimit(e) && i < 2) {

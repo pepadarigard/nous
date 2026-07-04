@@ -58,16 +58,23 @@ export interface ProgressEvent {
   kind?: LessonKind // для честного XP по истории (переживает обновление плана)
 }
 
-export type Provider = 'groq' | 'openrouter' | 'cerebras' | 'gigachat' | 'yandex'
+export type Provider =
+  | 'groq'
+  | 'openrouter'
+  | 'cerebras'
+  | 'siliconflow'
+  | 'zhipu'
+  | 'nvidia'
+  | 'deepinfra'
+  | 'novita'
+  | 'github'
 
 export interface AppConfig {
-  apiKey: string // ключ Groq
-  apiKeyOr?: string // ключ OpenRouter (провайдер, работающий в РФ без VPN)
-  apiKeyCb?: string // ключ Cerebras (сверхбыстрый, щедрый бесплатный лимит)
-  apiKeyGc?: string // ключ авторизации GigaChat (Сбер — гарантированно работает в РФ)
-  apiKeyYa?: string // API-ключ YandexGPT (Yandex Cloud)
-  yandexFolder?: string // Folder ID каталога Yandex Cloud (входит в адрес модели gpt://folder/model)
-  provider?: Provider // активный провайдер ИИ (по умолчанию groq)
+  apiKey: string // ключ Groq (историческое поле)
+  apiKeyOr?: string // ключ OpenRouter
+  apiKeyCb?: string // ключ Cerebras
+  extraKeys?: Partial<Record<Provider, string>> // ключи остальных провайдеров
+  provider?: Provider // активный провайдер ИИ
   textModel: string
   modelAutoPicked?: boolean // самая умная модель уже подобрана автоматически (чтобы не перевыбирать)
   showEstimate?: boolean // показывать приблизительный балл по прогрессу (по умолчанию да)

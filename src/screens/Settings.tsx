@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { checkApiKey, humanError, isTauri, openExternal, saveState } from '../lib/api'
 import { chatModels, modelLabel, modelScore, pickBestModel } from '../lib/models'
-import { PROVIDERS, activeKey } from '../lib/providers'
+import { PROVIDERS, PROVIDER_ORDER, activeKey, keyOf, keyPatch, normProvider } from '../lib/providers'
 import { appVersion, checkUpdate, GITHUB_URL, type UpdateInfo } from '../lib/update'
 import { subjectName } from '../data/subjects'
 import type { AppData, Provider } from '../types'
@@ -11,21 +11,18 @@ import PlanImporter from './PlanImporter'
 import PlanExtender from './PlanExtender'
 import { KeyRound, RefreshCw, AlertTriangle, Wand2, Download, Upload, ExternalLink, FolderOpen } from 'lucide-react'
 
+const selProv = { borderColor: 'var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-text)', fontWeight: 700 }
+
 export default function Settings() {
   const data = useStore((s) => s.data)
   const setConfig = useStore((s) => s.setConfig)
   const setExamDate = useStore((s) => s.setExamDate)
   const resetAll = useStore((s) => s.resetAll)
 
-  const [prov, setProv] = useState<Provider>(data.config.provider && PROVIDERS[data.config.provider] ? data.config.provider : 'groq')
-  const [keys, setKeys] = useState<Record<Provider, string>>({
-    groq: data.config.apiKey,
-    openrouter: data.config.apiKeyOr || '',
-    cerebras: data.config.apiKeyCb || '',
-    gigachat: data.config.apiKeyGc || '',
-    yandex: data.config.apiKeyYa || '',
-  })
-  const [yaFolder, setYaFolder] = useState(data.config.yandexFolder || '')
+  const [prov, setProv] = useState<Provider>(normProvider(data.config.provider))
+  const [keys, setKeys] = useState<Record<Provider, string>>(
+    () => Object.fromEntries(PROVIDER_ORDER.map((p) => [p, keyOf(data.config, p)])) as Record<Provider, string>,
+  )
   const apiKey = keys[prov]
   const setApiKey = (v: string) => setKeys((k) => ({ ...k, [prov]: v }))
   const pInfo = PROVIDERS[prov]
@@ -57,7 +54,7 @@ export default function Settings() {
     appVersion().then(setVersion)
     const k = activeKey(data.config)
     if (k) {
-      checkApiKey(k, data.config.provider ?? 'groq', { folder: data.config.yandexFolder }).then((r) => {
+      checkApiKey(k, normProvider(data.config.provider)).then((r) => {
         if (r.ok && r.models?.length) setAvailable(r.models)
       })
     }
@@ -93,13 +90,7 @@ export default function Settings() {
   // забыть нажать «Сохранить» больше нельзя.
   const keySaveTimer = useRef<number | null>(null)
   function saveKeyFor(p: Provider, v: string) {
-    setConfig(
-      p === 'openrouter' ? { apiKeyOr: v }
-      : p === 'cerebras' ? { apiKeyCb: v }
-      : p === 'gigachat' ? { apiKeyGc: v }
-      : p === 'yandex' ? { apiKeyYa: v }
-      : { apiKey: v },
-    )
+    setConfig(keyPatch(useStore.getState().data.config, p, v))
   }
   function onKeyInput(v: string) {
     setApiKey(v)
@@ -115,14 +106,17 @@ export default function Settings() {
   const smarter = best && modelScore(best) > modelScore(textModel) ? best : null
 
   function save() {
-    setConfig({ provider: prov, apiKey: keys.groq, apiKeyOr: keys.openrouter, apiKeyCb: keys.cerebras, apiKeyGc: keys.gigachat, apiKeyYa: keys.yandex, yandexFolder: yaFolder.trim(), textModel })
+    // ключи текущей формы — поверх конфига (extraKeys собираются keyPatch'ем по одному)
+    let cfg = useStore.getState().data.config
+    for (const p of PROVIDER_ORDER) cfg = { ...cfg, ...keyPatch(cfg, p, keys[p]) }
+    setConfig({ ...cfg, provider: prov, textModel })
     setSaved(true)
     setTimeout(() => setSaved(false), 1600)
   }
   async function check() {
     setChecking(true)
     setCheckMsg(null)
-    const r = await checkApiKey(apiKey, prov, { folder: yaFolder })
+    const r = await checkApiKey(apiKey, prov)
     setChecking(false)
     setCheckMsg(r.ok ? { ok: true, text: `Рабочий. Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: humanError(r.error || 'Ошибка') })
     if (r.models?.length) setAvailable(r.models)
@@ -210,22 +204,17 @@ export default function Settings() {
         <label className="field" style={{ marginBottom: 8 }}>
           <span>Провайдер</span>
         </label>
-        <div className="seg" style={{ marginBottom: 6 }}>
-          <button className={'seg-btn' + (prov === 'gigachat' ? ' on' : '')} onClick={() => switchProv('gigachat')}>
-            🛡 GigaChat
-          </button>
-          <button className={'seg-btn' + (prov === 'openrouter' ? ' on' : '')} onClick={() => switchProv('openrouter')}>
-            🌍 OpenRouter
-          </button>
-          <button className={'seg-btn' + (prov === 'cerebras' ? ' on' : '')} onClick={() => switchProv('cerebras')}>
-            🚀 Cerebras
-          </button>
-          <button className={'seg-btn' + (prov === 'yandex' ? ' on' : '')} onClick={() => switchProv('yandex')}>
-            🟡 Яндекс
-          </button>
-          <button className={'seg-btn' + (prov === 'groq' ? ' on' : '')} onClick={() => switchProv('groq')}>
-            ⚡ Groq (VPN)
-          </button>
+        <div className="row wrap" style={{ gap: 6, marginBottom: 6 }}>
+          {PROVIDER_ORDER.map((p) => (
+            <div
+              key={p}
+              className="chip"
+              style={{ cursor: 'pointer', ...(prov === p ? selProv : {}) }}
+              onClick={() => switchProv(p)}
+            >
+              {PROVIDERS[p].name}{p === 'groq' ? ' (VPN)' : ''}{keys[p] ? ' ✓' : ''}
+            </div>
+          ))}
         </div>
         <p className="small muted" style={{ marginTop: 0 }}>
           {pInfo.name}: {pInfo.hint}.{' '}
@@ -233,19 +222,8 @@ export default function Settings() {
         </p>
         <label className="field">
           <span>API-ключ {pInfo.name}</span>
-          <input className="input" type="password" value={apiKey} onChange={(e) => onKeyInput(e.target.value)} onBlur={saveKeyNow} placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'ключ авторизации (Authorization Key)'} />
+          <input className="input" type="password" value={apiKey} onChange={(e) => onKeyInput(e.target.value)} onBlur={saveKeyNow} placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'вставь ключ'} />
         </label>
-        {prov === 'yandex' && (
-          <label className="field">
-            <span>Folder ID (каталог Yandex Cloud)</span>
-            <input
-              className="input"
-              value={yaFolder}
-              onChange={(e) => { setYaFolder(e.target.value); setConfig({ yandexFolder: e.target.value.trim() }) }}
-              placeholder="b1g..."
-            />
-          </label>
-        )}
         <label className="field">
           <span>Модель</span>
           <select className="select" value={textModel} onChange={(e) => setTextModel(e.target.value)}>

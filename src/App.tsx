@@ -29,7 +29,7 @@ export default function App() {
     const { config } = useStore.getState().data
     const key = activeKey(config)
     if (!key || config.modelAutoPicked) return
-    checkApiKey(key, config.provider ?? 'groq', { folder: config.yandexFolder }).then((r) => {
+    checkApiKey(key, config.provider ?? 'groq').then((r) => {
       if (!r.ok || !r.models?.length) return // сеть/ключ подведёт — попробуем при следующем запуске
       const best = pickBestModel(r.models, config.provider)
       const setConfig = useStore.getState().setConfig

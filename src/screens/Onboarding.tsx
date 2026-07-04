@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { SUBJECTS, WEEKDAYS, subjectName } from '../data/subjects'
 import { checkApiKey, humanError, isTauri, openExternal } from '../lib/api'
 import { modelLabel, pickBestModel } from '../lib/models'
-import { PROVIDERS } from '../lib/providers'
+import { ONBOARDING_PROVIDERS, PROVIDERS, PROVIDER_ORDER, keyOf, keyPatch, normProvider } from '../lib/providers'
 import type { Provider } from '../types'
 import { EGE_YEAR, EXAM_DATE_DEFAULT } from '../data/ege2027'
 import PlanImporter from './PlanImporter'
@@ -18,16 +18,11 @@ export default function Onboarding() {
   const store = useStore()
   const [step, setStep] = useState<Step>('welcome')
 
-  // OpenRouter по умолчанию — работает в России без VPN (Groq для тех, у кого VPN есть).
-  const [prov, setProv] = useState<Provider>(store.data.config.provider ?? 'openrouter')
-  const [keys, setKeys] = useState<Record<Provider, string>>({
-    groq: store.data.config.apiKey || '',
-    openrouter: store.data.config.apiKeyOr || '',
-    cerebras: store.data.config.apiKeyCb || '',
-    gigachat: store.data.config.apiKeyGc || '',
-    yandex: store.data.config.apiKeyYa || '',
-  })
-  const [yaFolder, setYaFolder] = useState(store.data.config.yandexFolder || '')
+  // OpenRouter по умолчанию — работает в России без VPN.
+  const [prov, setProv] = useState<Provider>(normProvider(store.data.config.provider))
+  const [keys, setKeys] = useState<Record<Provider, string>>(
+    () => Object.fromEntries(PROVIDER_ORDER.map((p) => [p, keyOf(store.data.config, p)])) as Record<Provider, string>,
+  )
   const apiKey = keys[prov]
   const pInfo = PROVIDERS[prov]
   const setApiKey = (v: string) => setKeys((k) => ({ ...k, [prov]: v }))
@@ -49,7 +44,7 @@ export default function Onboarding() {
   async function doCheck() {
     setChecking(true)
     setCheckMsg(null)
-    const r = await checkApiKey(apiKey, prov, { folder: yaFolder })
+    const r = await checkApiKey(apiKey, prov)
     setChecking(false)
     if (r.ok) {
       // Сразу подбираем самую сильную модель из доступных у провайдера (для OpenRouter — из бесплатных).
@@ -92,7 +87,7 @@ export default function Onboarding() {
     if (!model) {
       // Тихо подбираем самую сильную прямо сейчас.
       try {
-        const r = await checkApiKey(apiKey, prov, { folder: yaFolder })
+        const r = await checkApiKey(apiKey, prov)
         const best = r.models?.length ? pickBestModel(r.models, prov) : null
         if (best) model = best
       } catch {
@@ -100,17 +95,9 @@ export default function Onboarding() {
       }
     }
     if (!model) model = pInfo.defaultModel // сеть подвела — надёжный дефолт провайдера
-    store.setConfig({
-      provider: prov,
-      apiKey: keys.groq,
-      apiKeyOr: keys.openrouter,
-      apiKeyCb: keys.cerebras,
-      apiKeyGc: keys.gigachat,
-      apiKeyYa: keys.yandex,
-      yandexFolder: yaFolder.trim(),
-      textModel: model,
-      modelAutoPicked: true,
-    })
+    let cfg = store.data.config
+    for (const p of PROVIDER_ORDER) cfg = { ...cfg, ...keyPatch(cfg, p, keys[p]) }
+    store.setConfig({ ...cfg, provider: prov, textModel: model, modelAutoPicked: true })
     setStep('subjects')
   }
   function saveSubjectsAndNext() {
@@ -189,75 +176,38 @@ export default function Onboarding() {
             <p className="muted" style={{ marginTop: 0 }}>
               ИИ работает на твоём бесплатном ключе. Выбери сервис:
             </p>
-            <div className="grid cols-2" style={{ marginBottom: 14 }}>
-              <div className={'subject-card' + (prov === 'openrouter' ? ' sel' : '')} onClick={() => { setProv('openrouter'); setCheckMsg(null) }}>
-                <span className="emoji">🇷🇺</span>
-                <div>
-                  <div style={{ fontWeight: 700 }}>OpenRouter</div>
-                  <div className="small muted">работает в России без VPN · бесплатные модели</div>
+            <div className="grid cols-2" style={{ marginBottom: 10 }}>
+              {ONBOARDING_PROVIDERS.map((p) => (
+                <div key={p} className={'subject-card' + (prov === p ? ' sel' : '')} onClick={() => { setProv(p); setCheckMsg(null) }}>
+                  <span className="emoji">{p === 'openrouter' ? '🌍' : p === 'siliconflow' ? '🧪' : p === 'zhipu' ? '🧠' : '🚀'}</span>
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{PROVIDERS[p].name}</div>
+                    <div className="small muted">{PROVIDERS[p].hint}</div>
+                  </div>
+                  <div className="check">{prov === p && <Check size={14} />}</div>
                 </div>
-                <div className="check">{prov === 'openrouter' && <Check size={14} />}</div>
-              </div>
-              <div className={'subject-card' + (prov === 'cerebras' ? ' sel' : '')} onClick={() => { setProv('cerebras'); setCheckMsg(null) }}>
-                <span className="emoji">🚀</span>
-                <div>
-                  <div style={{ fontWeight: 700 }}>Cerebras</div>
-                  <div className="small muted">сверхбыстрый · щедрый бесплатный лимит</div>
-                </div>
-                <div className="check">{prov === 'cerebras' && <Check size={14} />}</div>
-              </div>
-              <div className={'subject-card' + (prov === 'gigachat' ? ' sel' : '')} onClick={() => { setProv('gigachat'); setCheckMsg(null) }}>
-                <span className="emoji">🛡</span>
-                <div>
-                  <div style={{ fontWeight: 700 }}>GigaChat (Сбер)</div>
-                  <div className="small muted">гарантированно в России · отличный русский</div>
-                </div>
-                <div className="check">{prov === 'gigachat' && <Check size={14} />}</div>
-              </div>
-              <div className={'subject-card' + (prov === 'yandex' ? ' sel' : '')} onClick={() => { setProv('yandex'); setCheckMsg(null) }}>
-                <span className="emoji">🟡</span>
-                <div>
-                  <div style={{ fontWeight: 700 }}>YandexGPT</div>
-                  <div className="small muted">Яндекс · в России без VPN · нужен Yandex Cloud</div>
-                </div>
-                <div className="check">{prov === 'yandex' && <Check size={14} />}</div>
-              </div>
-              <div className={'subject-card' + (prov === 'groq' ? ' sel' : '')} onClick={() => { setProv('groq'); setCheckMsg(null) }}>
-                <span className="emoji">⚡</span>
-                <div>
-                  <div style={{ fontWeight: 700 }}>Groq</div>
-                  <div className="small muted">очень быстрый · в России нужен VPN</div>
-                </div>
-                <div className="check">{prov === 'groq' && <Check size={14} />}</div>
-              </div>
+              ))}
             </div>
+            <p className="small muted" style={{ marginTop: 0 }}>
+              Ещё провайдеры (NVIDIA, DeepInfra, Novita, GitHub, Groq) — потом в Настройках.
+            </p>
             <p className="small muted" style={{ marginTop: 0 }}>
               Получить бесплатный ключ {pInfo.name}:{' '}
               <a href={pInfo.keysUrl} onClick={(e) => { e.preventDefault(); openExternal(pInfo.keysUrl) }}>
                 {pInfo.keysUrl.replace('https://', '')}
               </a>{' '}
-              {prov === 'gigachat'
-                ? '(вход по Сбер ID → создай проект GigaChat API → скопируй «Ключ авторизации»)'
-                : prov === 'yandex'
-                  ? '(консоль Yandex Cloud → сервисный аккаунт → API-ключ; там же скопируй Folder ID каталога)'
-                  : '(регистрация → Create API Key → скопируй ключ)'}
+              (регистрация → создай API-ключ → скопируй)
             </p>
             <label className="field">
               <span><KeyRound size={13} style={{ verticalAlign: -2, marginRight: 5 }} />API-ключ {pInfo.name}</span>
               <input
                 className="input"
                 type="password"
-                placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'ключ авторизации (Authorization Key)'}
+                placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'вставь ключ'}
                 value={apiKey}
                 onChange={(e) => { setApiKey(e.target.value); setCheckMsg(null) }}
               />
             </label>
-            {prov === 'yandex' && (
-              <label className="field">
-                <span>Folder ID (каталог Yandex Cloud)</span>
-                <input className="input" placeholder="b1g..." value={yaFolder} onChange={(e) => { setYaFolder(e.target.value); setCheckMsg(null) }} />
-              </label>
-            )}
             <p className="small muted" style={{ marginTop: 0 }}>
               🧠 Модель ИИ подберём автоматически — самую умную из доступных (сменить можно в Настройках).
             </p>

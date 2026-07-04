@@ -1,119 +1,23 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::OnceLock;
+use std::time::Duration;
 use tauri::Manager;
 
-/// Разрешённые сервисы ИИ: Groq (нужен VPN в РФ), OpenRouter/Cerebras (в РФ без VPN), YandexGPT (РФ).
+/// Разрешённые сервисы ИИ (все OpenAI-совместимые). Кроме Groq — работают в РФ без VPN.
 fn allowed_api(url: &str) -> bool {
-    url.starts_with("https://api.groq.com/")
-        || url.starts_with("https://openrouter.ai/")
-        || url.starts_with("https://api.cerebras.ai/")
-        || url.starts_with("https://llm.api.cloud.yandex.net/")
-}
-
-// ===== GigaChat (Сбер): российский провайдер, гарантированно работает в РФ =====
-// TLS у Сбера подписан НУЦ Минцифры — вшиваем их сертификаты, чтобы у пользователей
-// работало без установки гос-сертификатов в систему.
-const GIGA_OAUTH_URL: &str = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
-const GIGA_API_BASE: &str = "https://gigachat.devices.sberbank.ru/api/v1";
-
-fn giga_http() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        let root = reqwest::Certificate::from_pem(include_bytes!("../certs/russian_trusted_root_ca.pem"))
-            .expect("root ca");
-        let sub = reqwest::Certificate::from_pem(include_bytes!("../certs/russian_trusted_sub_ca.pem"))
-            .expect("sub ca");
-        reqwest::Client::builder()
-            .add_root_certificate(root)
-            .add_root_certificate(sub)
-            .timeout(Duration::from_secs(90))
-            .connect_timeout(Duration::from_secs(15))
-            .build()
-            .expect("giga client")
-    })
-}
-
-/// Кэш access-токена GigaChat: (ключ авторизации, токен, истекает_ms).
-fn giga_token_cache() -> &'static Mutex<Option<(String, String, u64)>> {
-    static CACHE: OnceLock<Mutex<Option<(String, String, u64)>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(None))
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
-/// Получить access-токен (кэш ~25 минут; сам токен живёт 30).
-async fn giga_access_token(auth_key: &str, force: bool) -> Result<String, String> {
-    if !force {
-        if let Some((k, tok, exp)) = giga_token_cache().lock().unwrap().clone() {
-            if k == auth_key && now_ms() + 60_000 < exp {
-                return Ok(tok);
-            }
-        }
-    }
-    let resp = giga_http()
-        .post(GIGA_OAUTH_URL)
-        .header("Authorization", format!("Basic {}", auth_key))
-        .header("RqUID", uuid::Uuid::new_v4().to_string())
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body("scope=GIGACHAT_API_PERS")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let status = resp.status();
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-    let v: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|_| format!("GigaChat oauth: не-JSON ответ ({})", status))?;
-    let token = v["access_token"].as_str().ok_or_else(|| {
-        let msg = v["message"].as_str().unwrap_or("нет access_token");
-        format!("GigaChat: ключ авторизации не подошёл ({})", msg)
-    })?;
-    let expires = v["expires_at"].as_u64().unwrap_or(now_ms() + 25 * 60_000);
-    *giga_token_cache().lock().unwrap() = Some((auth_key.to_string(), token.to_string(), expires));
-    Ok(token.to_string())
-}
-
-/// Чат-запрос к GigaChat (OpenAI-подобное тело). При протухшем токене — один повтор.
-#[tauri::command]
-async fn giga_request(auth_key: String, body: String) -> Result<String, String> {
-    let mut token = giga_access_token(&auth_key, false).await?;
-    for attempt in 0..2 {
-        let resp = giga_http()
-            .post(format!("{}/chat/completions", GIGA_API_BASE))
-            .header("Authorization", format!("Bearer {}", token))
-            .header("Content-Type", "application/json")
-            .body(body.clone())
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        let status = resp.status().as_u16();
-        let text = resp.text().await.map_err(|e| e.to_string())?;
-        if status == 401 && attempt == 0 {
-            token = giga_access_token(&auth_key, true).await?;
-            continue;
-        }
-        return Ok(text);
-    }
-    Err("GigaChat: не удалось выполнить запрос".into())
-}
-
-/// GET к GigaChat API (список моделей / проверка ключа).
-#[tauri::command]
-async fn giga_get(auth_key: String, path: String) -> Result<String, String> {
-    if !path.starts_with('/') || path.contains("..") {
-        return Err("Недопустимый путь".into());
-    }
-    let token = giga_access_token(&auth_key, false).await?;
-    let resp = giga_http()
-        .get(format!("{}{}", GIGA_API_BASE, path))
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    resp.text().await.map_err(|e| e.to_string())
+    const ALLOWED: [&str; 9] = [
+        "https://api.groq.com/",
+        "https://openrouter.ai/",
+        "https://api.cerebras.ai/",
+        "https://api.siliconflow.com/",
+        "https://api.siliconflow.cn/",
+        "https://open.bigmodel.cn/",
+        "https://integrate.api.nvidia.com/",
+        "https://api.deepinfra.com/",
+        "https://api.novita.ai/",
+    ];
+    ALLOWED.iter().any(|a| url.starts_with(a)) || url.starts_with("https://models.github.ai/")
 }
 
 /// Один HTTP-клиент на всё приложение + таймаут, чтобы запрос не завис навсегда.
@@ -173,17 +77,15 @@ fn save_state(app: tauri::AppHandle, data: String) -> Result<(), String> {
 }
 
 /// Прокси-запрос к провайдеру ИИ (OpenAI-совместимый chat/completions). Тело формируется на фронте.
-/// auth_prefix: "Bearer" (по умолчанию) или "Api-Key" (YandexGPT).
 #[tauri::command]
-async fn llm_request(api_key: String, body: String, base: String, auth_prefix: Option<String>) -> Result<String, String> {
+async fn llm_request(api_key: String, body: String, base: String) -> Result<String, String> {
     let url = format!("{}/chat/completions", base.trim_end_matches('/'));
     if !allowed_api(&url) {
         return Err("Недопустимый адрес сервиса ИИ".into());
     }
-    let prefix = auth_prefix.unwrap_or_else(|| "Bearer".into());
     let resp = http()
         .post(&url)
-        .header("Authorization", format!("{} {}", prefix, api_key))
+        .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .header("X-Title", "Nous")
         .body(body)
@@ -265,8 +167,6 @@ pub fn run() {
             save_state,
             llm_request,
             llm_get,
-            giga_request,
-            giga_get,
             github_latest,
             export_state,
             reveal_path

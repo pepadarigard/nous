@@ -2,7 +2,7 @@
 // В Tauri — вызовы Rust-команд; в браузере — localStorage + прямой fetch/файловый input.
 
 import type { AppData, Provider } from '../types'
-import { OR_FALLBACK_MODELS, PROVIDERS, YANDEX_MODELS } from './providers'
+import { GITHUB_MODELS, OR_FALLBACK_MODELS, PROVIDERS, normProvider } from './providers'
 
 export const isTauri =
   typeof window !== 'undefined' &&
@@ -53,15 +53,12 @@ export interface GroqBody {
  * Низкоуровневый запрос к провайдеру ИИ (OpenAI-совместимый chat/completions).
  * В Tauri идёт через Rust (без CORS). В браузере — прямой fetch.
  */
-export interface ProviderExtra {
-  folder?: string // Yandex Cloud Folder ID
-}
-
-export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider = 'groq', extra?: ProviderExtra): Promise<any> {
-  const p = PROVIDERS[provider]
+export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider = 'groq'): Promise<any> {
+  const prov = normProvider(provider)
+  const p = PROVIDERS[prov]
   const payload: Record<string, unknown> = { ...body }
-  if (provider !== 'groq') delete payload.reasoning_format // параметр только Groq — другие провайдеры его не знают
-  if (provider === 'openrouter') {
+  if (prov !== 'groq') delete payload.reasoning_format // параметр только Groq — другие провайдеры его не знают
+  if (prov === 'openrouter') {
     // Бесплатные модели часто перегружены (429 upstream) — даём OpenRouter цепочку запасных,
     // он сам переключится. Формат: массив `models` ВМЕСТО одиночного `model`.
     // ВАЖНО: OpenRouter принимает МАКСИМУМ 3 модели в массиве (больше → ошибка 400).
@@ -69,29 +66,15 @@ export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider
     payload.models = chain
     delete payload.model
   }
-  if (provider === 'gigachat') {
-    delete payload.response_format // GigaChat может не знать этот параметр; JSON парсим из текста
-  }
-  if (provider === 'yandex') {
-    // Яндексу нужен полный адрес модели с Folder ID и заголовок Api-Key вместо Bearer.
-    const folder = (extra?.folder || '').trim()
-    if (!folder) throw new Error('YandexGPT: укажи Folder ID в Настройках (каталог Yandex Cloud)')
-    payload.model = `gpt://${folder}/${body.model}`
-    delete payload.response_format
-  }
-  const authPrefix = provider === 'yandex' ? 'Api-Key' : 'Bearer'
   const bodyStr = JSON.stringify(payload)
   let text: string
-  if (provider === 'gigachat') {
-    if (!isTauri) throw new Error('GigaChat работает только в приложении (не в браузере)')
-    text = await invoke<string>('giga_request', { authKey: apiKey, body: bodyStr })
-  } else if (isTauri) {
-    text = await invoke<string>('llm_request', { apiKey, body: bodyStr, base: p.base, authPrefix })
+  if (isTauri) {
+    text = await invoke<string>('llm_request', { apiKey, body: bodyStr, base: p.base })
   } else {
     const res = await fetch(`${p.base}/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `${authPrefix} ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         'X-Title': 'Nous',
       },
@@ -129,23 +112,17 @@ async function authGet(apiKey: string, url: string): Promise<any> {
 }
 
 /** Проверка ключа провайдера + список моделей. */
-export async function checkApiKey(apiKey: string, provider: Provider = 'groq', extra?: ProviderExtra): Promise<{ ok: boolean; error?: string; models?: string[] }> {
-  const p = PROVIDERS[provider]
+export async function checkApiKey(apiKey: string, provider: Provider = 'groq'): Promise<{ ok: boolean; error?: string; models?: string[] }> {
+  const prov = normProvider(provider)
+  const p = PROVIDERS[prov]
   try {
-    if (provider === 'yandex') {
-      // Списка моделей у Яндекса нет — проверяем ключ микро-запросом дешёвой модели.
-      const r = await groqRaw(apiKey, { model: 'yandexgpt-lite/latest', messages: [{ role: 'user', content: 'привет' }], max_tokens: 1 }, 'yandex', extra)
-      if (r?.choices) return { ok: true, models: YANDEX_MODELS }
-      return { ok: false, error: 'Неожиданный ответ YandexGPT' }
+    if (prov === 'github') {
+      // У GitHub Models нет обычного /models — проверяем ключ микро-запросом дешёвой модели.
+      const r = await groqRaw(apiKey, { model: 'openai/gpt-4o-mini', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 }, 'github')
+      if (r?.choices) return { ok: true, models: GITHUB_MODELS }
+      return { ok: false, error: 'Неожиданный ответ GitHub Models' }
     }
-    if (provider === 'gigachat') {
-      if (!isTauri) return { ok: false, error: 'GigaChat работает только в приложении (не в браузере)' }
-      const text = await invoke<string>('giga_get', { authKey: apiKey, path: '/models' })
-      const parsed = JSON.parse(text)
-      if (parsed?.message && !parsed?.data) return { ok: false, error: parsed.message }
-      return { ok: true, models: (parsed.data || []).map((m: any) => m.id) }
-    }
-    if (provider === 'openrouter') {
+    if (prov === 'openrouter') {
       // /models у OpenRouter публичный (список вернём в любом случае), а ключ проверяем отдельным эндпоинтом.
       const models = await authGet(apiKey, `${p.base}/models`)
         .then((r) => ((r?.data || []) as any[]).map((m: any) => m.id))
