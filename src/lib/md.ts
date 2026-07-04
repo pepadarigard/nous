@@ -9,8 +9,20 @@ function esc(s: string): string {
 const CB_OPEN = ' CB'
 const CB_CLOSE = ' '
 
+// Кэш разбора: при плавном стриме список сообщений перерисовывается десятки раз в секунду,
+// но меняется только последнее (растущее) сообщение — остальные берём из кэша, а не парсим заново.
+const mdCache = new Map<string, string>()
 export function mdToHtml(src: string): string {
   if (!src) return ''
+  const hit = mdCache.get(src)
+  if (hit !== undefined) return hit
+  const out = renderMd(src)
+  mdCache.set(src, out)
+  if (mdCache.size > 400) mdCache.delete(mdCache.keys().next().value as string)
+  return out
+}
+
+function renderMd(src: string): string {
   const blocks: string[] = []
   // код-блоки ```...``` — вытаскиваем, чтобы не трогать
   let t = src.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, _lang, code) => {

@@ -163,20 +163,37 @@ export const useStore = create<Store>((set, get) => {
 
     // Запрос к репетитору живёт В СТОРЕ, а не в компоненте чата: пользователь может уйти
     // на другую вкладку — ответ всё равно дойдёт и ляжет в chatMsgs, а не потеряется.
-    // Ответ СТРИМИТСЯ: текст появляется в переписке по мере генерации (батчим ~15 обновл./с).
+    // Вывод ПЛАВНЫЙ: сырой поток копится в acc, а на экран проявляем посимвольно, адаптивно
+    // догоняя буфер, — модель шлёт токены рывками, а текст «печатается» ровно.
     sendChat: async (text) => {
       const q = text.trim()
       const s0 = get()
       if (!q || s0.chatBusy) return
       const base: ChatMsg[] = [...s0.chatMsgs, { role: 'user', content: q }]
       set({ chatMsgs: base, chatBusy: true })
-      let ans = ''
-      let acc = ''
-      let flushTimer: ReturnType<typeof setTimeout> | null = null
-      const flush = () => {
-        flushTimer = null
-        set({ chatMsgs: [...base, { role: 'assistant', content: acc }] })
+
+      let acc = '' // весь полученный сырой текст
+      let shown = 0 // сколько символов уже показано
+      let finalText = '' // очищенный полный ответ (cleanMath)
+      let streamDone = false
+      let reveal: ReturnType<typeof setInterval> | null = null
+      const stopReveal = () => { if (reveal) { clearInterval(reveal); reveal = null } }
+      const alive = () => get().chatBusy // очистили чат извне → прекращаем, не воскрешаем переписку
+      const put = (content: string) => set({ chatMsgs: [...base, { role: 'assistant', content }] })
+
+      const tick = () => {
+        if (!alive()) { stopReveal(); return }
+        if (shown < acc.length) {
+          // проявляем долю отставания: ровное «печатание» с быстрым догоном при рывках потока
+          shown = Math.min(acc.length, shown + Math.max(1, Math.ceil((acc.length - shown) / 7)))
+          put(acc.slice(0, shown))
+        } else if (streamDone) {
+          stopReveal()
+          put(finalText || acc || 'Пустой ответ.')
+          set({ chatBusy: false })
+        }
       }
+
       try {
         const d = get().data
         // Краткая справка об ученике — чтобы репетитор отвечал в контексте его предметов и целей.
@@ -188,21 +205,29 @@ export const useStore = create<Store>((set, get) => {
           }),
           d.examDate ? `экзамен ${d.examDate}` : '',
         ].filter(Boolean).join('; ')
-        const a = await tutorChatStream(
+        finalText = await tutorChatStream(
           d.config,
           base.slice(-CHAT_CONTEXT).map((m) => ({ role: m.role, content: m.content })),
           ctx,
           (delta) => {
             acc += delta
-            if (!flushTimer) flushTimer = setTimeout(flush, 60)
+            if (!reveal) reveal = setInterval(tick, 20)
           },
         )
-        ans = a || 'Пустой ответ.'
+        streamDone = true
+        if (!alive()) { stopReveal(); return }
+        if (!reveal) {
+          // ничего не стримилось (мгновенный ответ) — показать сразу
+          put(finalText || 'Пустой ответ.')
+          set({ chatBusy: false })
+        }
+        // иначе финал покажет tick, когда «печать» догонит буфер
       } catch (e) {
-        ans = '⚠️ ' + humanError(e)
+        stopReveal()
+        if (!alive()) return
+        put('⚠️ ' + humanError(e))
+        set({ chatBusy: false })
       }
-      if (flushTimer) clearTimeout(flushTimer)
-      set({ chatMsgs: [...base, { role: 'assistant', content: ans }], chatBusy: false })
     },
     clearChat: () => set({ chatMsgs: [], chatBusy: false }),
 
