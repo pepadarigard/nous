@@ -5,7 +5,7 @@ import { isTauri } from './api'
 // Публичный репозиторий проекта (owner/repo). Используется для проверки обновлений.
 export const GITHUB_REPO = 'pepadarigard/nous'
 export const GITHUB_URL = `https://github.com/${GITHUB_REPO}`
-const FALLBACK_VERSION = '0.1.0'
+const FALLBACK_VERSION = '0.2.0'
 
 export async function appVersion(): Promise<string> {
   if (isTauri) {
