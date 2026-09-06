@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { referenceFor, type ReferenceDoc } from '../data/reference'
 import { useStore } from '../store'
 import { SUBJECTS, subjectById } from '../data/subjects'
 import type { Material } from '../types'
 import { extractText, humanSize, kindOf } from '../lib/extract'
 import { isTauri, loadMaterialText, openMaterialFile, saveMaterialFile, saveMaterialText, uid } from '../lib/api'
 import { countOf } from '../lib/plural'
+import Modal from '../ui/Modal'
 import {
   Upload,
   Search,
@@ -18,6 +20,7 @@ import {
   X,
   Loader2,
   Info,
+  BookOpen,
 } from 'lucide-react'
 
 // Оригиналы больше этого размера не копируем к себе: смысла мало, а место жалко.
@@ -170,10 +173,12 @@ export default function Materials() {
       <div className="page-head">
         <h1>Материалы</h1>
         <p>
-          Свои учебники, варианты, конспекты и таблицы. Текст из них вынимается прямо на твоём компьютере —
-          без интернета и без ИИ, поэтому поиск работает всегда.
+          Справочники внутри приложения и твои файлы. Текст из файлов вынимается прямо на твоём
+          компьютере — без интернета и без ИИ, поэтому поиск работает всегда.
         </p>
       </div>
+
+      <ReferenceShelf subjects={data.subjects} />
 
       <div
         className={'drop-zone' + (dragOver ? ' over' : '')}
@@ -385,3 +390,52 @@ function MaterialPreview({ material, query, onClose }: { material: Material; que
 }
 
 const selChip = { borderColor: 'var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-text)' }
+
+
+/**
+ * Полка встроенных справочников. Раздел «Материалы» из коробки был пуст, хотя
+ * формулы и ударения нужны с первого дня — теперь они лежат здесь и работают
+ * офлайн, как и всё остальное.
+ */
+function ReferenceShelf({ subjects }: { subjects: string[] }) {
+  const [open, setOpen] = useState<ReferenceDoc | null>(null)
+  const docs = referenceFor(subjects.length ? subjects : ['russian'])
+  if (!docs.length) return null
+
+  return (
+    <>
+      <div className="row wrap" style={{ gap: 8, marginBottom: 6 }}>
+        <BookOpen size={17} color="var(--accent)" />
+        <b>Справочники</b>
+        <span className="small muted">— всегда под рукой, без интернета</span>
+      </div>
+      <div className="grid cols-2" style={{ gap: 10, marginBottom: 20 }}>
+        {docs.map((d) => (
+          <button key={d.id} className="pick-card" onClick={() => setOpen(d)}>
+            <BookOpen size={18} color="var(--accent)" />
+            <div style={{ textAlign: 'left' }}>
+              <b>{d.title}</b>
+              <div className="small muted">{d.summary}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {open && (
+        <Modal title={open.title} onClose={() => setOpen(null)} wide>
+          <p className="small muted" style={{ marginTop: 0 }}>{open.summary}</p>
+          {open.sections.map((sec) => (
+            <div key={sec.title} className="card soft" style={{ marginBottom: 12 }}>
+              <b>{sec.title}</b>
+              <div style={{ marginTop: 8 }}>
+                {sec.lines.map((line, i) => (
+                  <div key={i} className="small" style={{ padding: '3px 0', lineHeight: 1.6 }}>{line}</div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </Modal>
+      )}
+    </>
+  )
+}
