@@ -10,7 +10,7 @@
 // Планы опираются на ОФИЦИАЛЬНЫЕ веса заданий из scoring.ts, поэтому «выгодные»
 // номера считаются, а не угадываются: задание на 4 балла стоит четырёх на 1 балл.
 
-import type { Block, Lesson, StudyPlan } from '../types'
+import type { Block, Lesson, StudyPlan, SubjectGoal } from '../types'
 import { EGE_TASKS, hasTaskMap, type EgeTask } from '../data/egeTasks'
 import { SCORING, primaryForTest, taskPoints } from '../data/scoring'
 import { subjectName } from '../data/subjects'
@@ -80,11 +80,29 @@ export const PRESETS: PlanPreset[] = [
   },
 ]
 
-/** Какой план предложить по умолчанию при таком запасе времени. */
-export function suggestPreset(weeksLeft?: number): string {
-  if (weeksLeft === undefined) return 'foundation'
-  if (weeksLeft <= 8) return 'finish'
-  if (weeksLeft <= 20) return 'sprint'
+/**
+ * Какой план предложить. Решает не только срок, но и то, что ученик о себе сказал:
+ * с текущими 30 баллами и целью 45 нужен другой план, чем с текущими 75 и целью 95,
+ * даже если времени поровну.
+ *
+ * Порядок важен: сроки перекрывают всё остальное. Когда до экзамена месяц, никакой
+ * «фундамент» уже не поможет, какие бы цели ни стояли.
+ */
+export function suggestPreset(weeksLeft?: number, goals: SubjectGoal[] = []): string {
+  if (weeksLeft !== undefined && weeksLeft <= 8) return 'finish'
+  if (weeksLeft !== undefined && weeksLeft <= 20) return 'sprint'
+  if (!goals.length) return 'foundation'
+
+  const avg = (f: (g: SubjectGoal) => number) => goals.reduce((s, g) => s + f(g), 0) / goals.length
+  const current = avg((g) => g.current)
+  const target = avg((g) => g.target)
+  // Порог берём из официальных минимумов по выбранным предметам.
+  const minTest = avg((g) => SCORING[g.subjectId]?.minTest ?? 40)
+
+  // Цель — едва перейти порог: вторая часть не нужна, она только съест время.
+  if (target <= minTest + 12) return 'threshold'
+  // База уже стоит — значит пора вкладываться во вторую часть.
+  if (current >= 70) return 'high'
   return 'foundation'
 }
 

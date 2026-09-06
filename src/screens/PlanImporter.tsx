@@ -63,7 +63,7 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
   const weeksLeft = store.data.examDate
     ? Math.max(0, Math.ceil((new Date(store.data.examDate).getTime() - Date.now()) / (7 * 86400000)))
     : undefined
-  const [preset, setPreset] = useState(() => suggestPreset(weeksLeft))
+  const [preset, setPreset] = useState(() => suggestPreset(weeksLeft, store.data.goals))
   const presetOpts = { subjects: offlineSubjects, examDate: store.data.examDate, weeksLeft }
   const offlineSize = offlineSubjects.length ? presetSize(preset, presetOpts) : 0
   const coverage = offlineSubjects.length ? presetCoverage(preset, presetOpts) : { covered: 0, max: 0 }
