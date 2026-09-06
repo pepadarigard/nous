@@ -4,12 +4,16 @@
 import type { SubjectTheory, TaskTheory } from './types'
 import { RUSSIAN_THEORY } from './russian'
 import { MATH_PROF_THEORY } from './mathProf'
+import { INFORMATICS_THEORY } from './informatics'
+import { PHYSICS_THEORY } from './physics'
 
 export type { TaskTheory, SubjectTheory }
 
 export const THEORY: Record<string, SubjectTheory> = {
   russian: RUSSIAN_THEORY,
   math_prof: MATH_PROF_THEORY,
+  informatics: INFORMATICS_THEORY,
+  physics: PHYSICS_THEORY,
 }
 
 /** Теория по конкретному номеру задания. undefined — значит, её ещё не написали. */
