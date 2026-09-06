@@ -6,7 +6,8 @@ import { extractQuestions, FIELD_LABEL, guessMapping, jsonToTable, parseTable, t
 import { decodeText } from '../lib/extract'
 import { loadMaterialText, uid } from '../lib/api'
 import { countOf } from '../lib/plural'
-import { FileUp, Library, Plus, Check, X, Loader2, ClipboardPaste } from 'lucide-react'
+import { SEED_BANK } from '../data/seedBank'
+import { FileUp, Library, Plus, Check, X, Loader2, ClipboardPaste, Sparkles } from 'lucide-react'
 
 type Mode = 'menu' | 'file' | 'paste' | 'material' | 'manual'
 
@@ -37,6 +38,7 @@ export default function BankImport({ onDone }: { onDone: () => void }) {
           <div className="small muted">CSV, TSV или JSON в любом виде — сам скажешь, где вопрос, где ответ.</div>
         </div>
       </button>
+      <SeedCard onDone={onDone} />
       <button className="pick-card" onClick={() => setMode('paste')}>
         <ClipboardPaste size={20} color="var(--accent)" />
         <div>
@@ -336,6 +338,62 @@ function FromMaterial({ onBack, onDone }: { onBack: () => void; onDone: () => vo
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * Стартовые задания. Нужны, чтобы тренажёр, интервальное повторение и балл
+ * работали сразу после установки, а не после того, как ученик где-то раздобудет
+ * свой банк. Задания оригинальные, ответы вычислены генератором — см. seedBank.ts.
+ */
+function SeedCard({ onDone }: { onDone: () => void }) {
+  const data = useStore((s) => s.data)
+  const addQuestions = useStore((s) => s.addQuestions)
+  const [added, setAdded] = useState(0)
+
+  const subjects = data.subjects.length ? data.subjects : ['russian']
+  const have = new Set((data.questions ?? []).map((q) => q.text))
+  // Сравниваем по тексту, а не по id: id при добавлении генерируется заново,
+  // и повторное нажатие иначе наплодило бы дубли.
+  const fresh = SEED_BANK.filter((q) => subjects.includes(q.subjectId) && !have.has(q.text))
+
+  function load() {
+    if (!fresh.length) return
+    addQuestions(
+      fresh.map((q) => ({
+        id: uid('q_'),
+        subjectId: q.subjectId,
+        taskNo: q.taskNo,
+        topic: q.topic,
+        text: q.text,
+        answer: q.answer,
+        origin: 'import' as const,
+        createdAt: new Date().toISOString(),
+      })),
+    )
+    setAdded(fresh.length)
+    setTimeout(onDone, 900)
+  }
+
+  return (
+    <button className="pick-card" onClick={load} disabled={!fresh.length}>
+      <Sparkles size={20} color="var(--accent)" />
+      <div style={{ textAlign: 'left' }}>
+        <b>Готовые задания</b>
+        <div className="small muted">
+          {added > 0 ? (
+            <>Добавлено {countOf(added, ['задание', 'задания', 'заданий'])} ✓</>
+          ) : fresh.length ? (
+            <>
+              {countOf(fresh.length, ['задание', 'задания', 'заданий'])} по твоим предметам, уже с
+              ответами — чтобы было что решать прямо сейчас.
+            </>
+          ) : (
+            <>Все стартовые задания по твоим предметам уже в банке.</>
+          )}
+        </div>
+      </div>
+    </button>
   )
 }
 
