@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import type { AppConfig, AppData, Block, ProgressEvent, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
-import { emptyData } from './types'
-import { loadState, saveState, uid, humanError } from './lib/api'
+import type { AppConfig, AppData, Attempt, Block, LessonBrief, Material, MockResult, PlanEvent, ProgressEvent, Question, ScheduleRules, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
+import { emptyData, emptyRules } from './types'
+import { catchUpPlan } from './lib/schedule'
+import { loadState, saveState, uid, humanError, deleteMaterialFiles } from './lib/api'
 import { tutorChatStream } from './lib/ai'
 import { subjectName } from './data/subjects'
 import { computeStats, type Celebration } from './lib/stats'
@@ -32,6 +33,27 @@ interface Store {
   setSchedules: (s: SubjectSchedule[]) => void
   setExamDate: (d?: string) => void
   setPlanNotes: (n: string) => void
+
+  pinLesson: (blockId: string, lessonId: string, dateISO?: string) => void
+  catchUpOverdue: () => number
+  addEvent: (e: Omit<PlanEvent, 'id'>) => void
+  updateEvent: (id: string, patch: Partial<PlanEvent>) => void
+  removeEvent: (id: string) => void
+  toggleEvent: (id: string) => void
+  setRules: (patch: Partial<ScheduleRules>) => void
+
+  addMaterial: (m: Material) => void
+  updateMaterial: (id: string, patch: Partial<Material>) => void
+  removeMaterial: (id: string) => void
+  attachMaterial: (blockId: string, lessonId: string, materialId: string) => void
+  detachMaterial: (blockId: string, lessonId: string, materialId: string) => void
+
+  setLessonBrief: (blockId: string, lessonId: string, brief?: LessonBrief) => void
+  addQuestions: (qs: Question[]) => void
+  updateQuestion: (id: string, patch: Partial<Question>) => void
+  removeQuestion: (id: string) => void
+  recordAttempt: (a: Omit<Attempt, 'id' | 'at'>) => void
+  recordMock: (m: Omit<MockResult, 'id' | 'at'>) => void
 
   setPlan: (p: StudyPlan) => void
   appendBlocks: (blocks: Block[]) => void
@@ -80,6 +102,148 @@ export const useStore = create<Store>((set, get) => {
     setSchedules: (s) => commit((d) => ({ ...d, schedules: s })),
     setExamDate: (date) => commit((d) => ({ ...d, examDate: date })),
     setPlanNotes: (n) => commit((d) => ({ ...d, planNotes: n })),
+
+    // Перенос занятия руками: дата → закрепить на ней, undefined → вернуть в авто-раскладку.
+    pinLesson: (blockId, lessonId, dateISO) =>
+      commit((d) => {
+        const block = d.plan?.blocks.find((b) => b.id === blockId)
+        const lesson = block?.lessons.find((l) => l.id === lessonId)
+        if (!lesson) return d
+        if (dateISO) lesson.pinnedDate = dateISO
+        else delete lesson.pinnedDate
+        return d
+      }),
+
+    // Разложить всё просроченное по ближайшим подходящим дням. Возвращает, сколько перенесено.
+    catchUpOverdue: () => {
+      const cur = get().data
+      if (!cur.plan) return 0
+      const byId = catchUpPlan(cur.plan, cur.schedules, cur.rules)
+      const moved = Object.keys(byId).length
+      if (!moved) return 0
+      commit((d) => {
+        for (const b of d.plan?.blocks ?? []) {
+          for (const l of b.lessons) {
+            if (byId[l.id]) l.pinnedDate = byId[l.id]
+          }
+        }
+        return d
+      })
+      return moved
+    },
+
+    addEvent: (e) =>
+      commit((d) => {
+        if (!d.events) d.events = []
+        d.events.push({ ...e, id: uid('ev_') })
+        return d
+      }),
+    updateEvent: (id, patch) =>
+      commit((d) => {
+        const ev = d.events?.find((x) => x.id === id)
+        if (ev) Object.assign(ev, patch)
+        return d
+      }),
+    removeEvent: (id) =>
+      commit((d) => {
+        d.events = (d.events ?? []).filter((x) => x.id !== id)
+        return d
+      }),
+    toggleEvent: (id) =>
+      commit((d) => {
+        const ev = d.events?.find((x) => x.id === id)
+        if (ev) ev.done = !ev.done
+        return d
+      }),
+    setRules: (patch) =>
+      commit((d) => {
+        d.rules = { ...emptyRules(), ...(d.rules ?? {}), ...patch }
+        return d
+      }),
+
+    addMaterial: (m) =>
+      commit((d) => {
+        if (!d.materials) d.materials = []
+        d.materials.unshift(m) // свежие — сверху
+        return d
+      }),
+    updateMaterial: (id, patch) =>
+      commit((d) => {
+        const m = d.materials?.find((x) => x.id === id)
+        if (m) Object.assign(m, patch)
+        return d
+      }),
+    // Удаление стирает и файлы на диске: оставлять их — копить мусор в папке приложения.
+    removeMaterial: (id) => {
+      const m = get().data.materials?.find((x) => x.id === id)
+      deleteMaterialFiles(id, m?.file).catch((e) => console.error('deleteMaterialFiles', e))
+      commit((d) => {
+        d.materials = (d.materials ?? []).filter((x) => x.id !== id)
+        for (const b of d.plan?.blocks ?? []) {
+          for (const l of b.lessons) {
+            if (l.materialIds?.includes(id)) l.materialIds = l.materialIds.filter((x) => x !== id)
+          }
+        }
+        return d
+      })
+    },
+    attachMaterial: (blockId, lessonId, materialId) =>
+      commit((d) => {
+        const lesson = d.plan?.blocks.find((b) => b.id === blockId)?.lessons.find((l) => l.id === lessonId)
+        if (!lesson) return d
+        if (!lesson.materialIds) lesson.materialIds = []
+        if (!lesson.materialIds.includes(materialId)) lesson.materialIds.push(materialId)
+        return d
+      }),
+    detachMaterial: (blockId, lessonId, materialId) =>
+      commit((d) => {
+        const lesson = d.plan?.blocks.find((b) => b.id === blockId)?.lessons.find((l) => l.id === lessonId)
+        if (lesson?.materialIds) lesson.materialIds = lesson.materialIds.filter((x) => x !== materialId)
+        return d
+      }),
+
+    // Материал занятия от ИИ сохраняется В САМО ЗАНЯТИЕ: сгенерировали один раз — дальше офлайн.
+    setLessonBrief: (blockId, lessonId, brief) =>
+      commit((d) => {
+        const lesson = d.plan?.blocks.find((b) => b.id === blockId)?.lessons.find((l) => l.id === lessonId)
+        if (!lesson) return d
+        if (brief) lesson.brief = brief
+        else delete lesson.brief
+        return d
+      }),
+
+    addQuestions: (qs) =>
+      commit((d) => {
+        if (!d.questions) d.questions = []
+        d.questions.push(...qs)
+        return d
+      }),
+    updateQuestion: (id, patch) =>
+      commit((d) => {
+        const q = d.questions?.find((x) => x.id === id)
+        if (q) Object.assign(q, patch)
+        return d
+      }),
+    removeQuestion: (id) =>
+      commit((d) => {
+        d.questions = (d.questions ?? []).filter((x) => x.id !== id)
+        return d
+      }),
+    recordAttempt: (a) =>
+      commit((d) => {
+        if (!d.attempts) d.attempts = []
+        d.attempts.push({ ...a, id: uid('at_'), at: new Date().toISOString() })
+        // История попыток не должна расти бесконечно — держим последние 5000.
+        if (d.attempts.length > 5000) d.attempts = d.attempts.slice(-5000)
+        return d
+      }),
+
+    recordMock: (m) =>
+      commit((d) => {
+        if (!d.mocks) d.mocks = []
+        d.mocks.push({ ...m, id: uid('mk_'), at: new Date().toISOString() })
+        return d
+      }),
 
     setPlan: (p) =>
       commit((d) => {

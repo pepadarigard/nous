@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -17,7 +19,9 @@ fn allowed_api(url: &str) -> bool {
         "https://api.deepinfra.com/",
         "https://api.novita.ai/",
     ];
-    ALLOWED.iter().any(|a| url.starts_with(a)) || url.starts_with("https://models.github.ai/")
+    // Локальные модели (Ollama, LM Studio) — на своей машине, ключ им не нужен.
+    let local = url.starts_with("http://localhost:") || url.starts_with("http://127.0.0.1:");
+    ALLOWED.iter().any(|a| url.starts_with(a)) || url.starts_with("https://models.github.ai/") || local
 }
 
 /// Один HTTP-клиент на всё приложение + таймаут. Генерация плана бывает долгой (медленные
@@ -205,6 +209,87 @@ async fn llm_get(api_key: String, url: String) -> Result<String, String> {
     resp.text().await.map_err(|e| e.to_string())
 }
 
+// ---------- Свои материалы (файлы пользователя) ----------
+//
+// Оригинал файла кладём в <app_data>/materials/<id>.<ext>, извлечённый текст — в <id>.txt.
+// В состоянии приложения (state.json) остаётся только описание — иначе файл состояния
+// распухнет от текста учебников и каждое сохранение станет тяжёлым.
+
+fn materials_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("materials");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Имя файла без сюрпризов: только то, что мы сами формируем (<id>.<ext>), без путей.
+fn safe_file_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        .collect()
+}
+
+/// Сохранить оригинал файла (данные приходят с фронта в base64).
+#[tauri::command]
+fn save_material(app: tauri::AppHandle, file_name: String, data_b64: String) -> Result<String, String> {
+    let dir = materials_dir(&app)?;
+    let bytes = B64
+        .decode(data_b64.as_bytes())
+        .map_err(|e| format!("не удалось раскодировать файл: {}", e))?;
+    let path = dir.join(safe_file_name(&file_name));
+    fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Сохранить извлечённый текст материала.
+#[tauri::command]
+fn save_material_text(app: tauri::AppHandle, id: String, text: String) -> Result<(), String> {
+    let dir = materials_dir(&app)?;
+    fs::write(dir.join(safe_file_name(&format!("{}.txt", id))), text).map_err(|e| e.to_string())
+}
+
+/// Прочитать извлечённый текст материала (None, если текста нет).
+#[tauri::command]
+fn load_material_text(app: tauri::AppHandle, id: String) -> Result<Option<String>, String> {
+    let dir = materials_dir(&app)?;
+    Ok(fs::read_to_string(dir.join(safe_file_name(&format!("{}.txt", id)))).ok())
+}
+
+/// Удалить материал: и оригинал, и текст.
+#[tauri::command]
+fn delete_material(app: tauri::AppHandle, id: String, file_name: Option<String>) -> Result<(), String> {
+    let dir = materials_dir(&app)?;
+    let _ = fs::remove_file(dir.join(safe_file_name(&format!("{}.txt", id))));
+    if let Some(f) = file_name {
+        let _ = fs::remove_file(dir.join(safe_file_name(&f)));
+    }
+    Ok(())
+}
+
+/// Полный путь к сохранённому оригиналу.
+#[tauri::command]
+fn material_path(app: tauri::AppHandle, file_name: String) -> Result<String, String> {
+    let dir = materials_dir(&app)?;
+    let path = dir.join(safe_file_name(&file_name));
+    if !path.exists() {
+        return Err("файл не найден".into());
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Открыть файл системной программой (Windows).
+#[tauri::command]
+fn open_file(path: String) -> Result<(), String> {
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", &path])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Последний релиз репозитория на GitHub (для проверки обновлений).
 #[tauri::command]
 async fn github_latest(repo: String) -> Result<String, String> {
@@ -264,7 +349,13 @@ pub fn run() {
             llm_get,
             github_latest,
             export_state,
-            reveal_path
+            reveal_path,
+            save_material,
+            save_material_text,
+            load_material_text,
+            delete_material,
+            material_path,
+            open_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

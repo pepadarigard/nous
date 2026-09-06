@@ -3,6 +3,8 @@ import { useStore } from '../store'
 import { subjectById } from '../data/subjects'
 import type { Block, StudyPlan } from '../types'
 import { computeStats, motivate } from '../lib/stats'
+import { estimateSubject, trustOf } from '../lib/score'
+import { countOf } from '../lib/plural'
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
 import { Flame, CalendarCheck, Target, Info } from 'lucide-react'
 
@@ -77,13 +79,24 @@ export default function ProgressScreen() {
   const cumSeries = Object.entries(cumMap).map(([date, count]) => ({ date, count }))
 
   const comp = completionBySubject(data.plan)
-  // Честный приблизительный балл: старт + доля пройденного плана до цели. Никогда не выше цели.
+  // Балл считается по РЕШЁННОМУ в тренажёре, а не по отмеченным занятиям: галочка — это
+  // самоотчёт, а попытка с вердиктом — измерение. Нет решений → нет и балла, врать не будем.
+  const attempts = data.attempts ?? []
   const rows = data.goals.map((g) => {
     const c = comp[g.subjectId] || { done: 0, total: 0 }
     const frac = c.total ? c.done / c.total : 0
-    const est = Math.round(g.current + (g.target - g.current) * frac)
-    return { g, subj: subjectById(g.subjectId), done: c.done, total: c.total, pct: Math.round(frac * 100), est }
+    const est = estimateSubject(g.subjectId, attempts)
+    return {
+      g,
+      subj: subjectById(g.subjectId),
+      done: c.done,
+      total: c.total,
+      pct: Math.round(frac * 100),
+      est,
+      trust: trustOf(est),
+    }
   })
+  const anyStaleScale = rows.some((r) => r.est?.scaleStale)
 
   return (
     <div className="fade-in">
@@ -200,13 +213,23 @@ export default function ProgressScreen() {
               <div><b>Готовность</b> — какую часть плана по предмету ты уже прошёл.</div>
               {showEstimate && (
                 <div style={{ marginTop: 3 }}>
-                  <b>Балл</b> — стартовый балл плюс доля пройденного пути к цели. Честный ориентир по прогрессу, а не гарантия результата ЕГЭ.
+                  <b>Балл</b> — из решённого в тренажёре: точность по каждому номеру задания умножается
+                  на его вес в первичных баллах по спецификации ФИПИ, дальше — перевод по шкале.
+                  Считается только по тем номерам, что ты решал, поэтому рядом всегда стоит покрытие.
+                  Отмеченные занятия на балл не влияют: галочка — это обещание, а не результат.
+                </div>
+              )}
+              {showEstimate && anyStaleScale && (
+                <div style={{ marginTop: 3 }}>
+                  ⚠️ По профильной математике структура ЕГЭ-2027 изменилась (20 заданий, 33 первичных балла),
+                  а шкала перевода на 2027 год выйдет только весной. Пока считаем по шкале 2026 — балл там
+                  самый грубый.
                 </div>
               )}
             </div>
           </div>
           <div className="grid cols-2 stagger">
-            {rows.map(({ g, subj, done: d, total: t, pct, est }) => (
+            {rows.map(({ g, subj, done: d, total: t, pct, est, trust }) => (
               <div className="card subj-card" key={g.subjectId}>
                 <div className="subj-top">
                   <span className="subj-emoji">{subj?.emoji || '📘'}</span>
@@ -214,12 +237,21 @@ export default function ProgressScreen() {
                     <b>{subj?.short || g.subjectId}</b>
                     <div className="small muted">{t ? `Пройдено ${d} из ${t} занятий` : 'План ещё не составлен'}</div>
                   </div>
-                  {showEstimate && (
-                    <div className="score-badge" title="Приблизительный балл по прогрессу плана">
-                      <div className="score-num">≈{est}</div>
-                      <div className="score-cap">балл</div>
-                    </div>
-                  )}
+                  {showEstimate &&
+                    (est ? (
+                      <div
+                        className="score-badge"
+                        title={`На проверенной части набрано ${est.earnedOnCovered.toFixed(1)} из ${est.maxPrimary} первичных баллов`}
+                      >
+                        <div className="score-num">≈{est.testScore}</div>
+                        <div className="score-cap">балл</div>
+                      </div>
+                    ) : (
+                      <div className="score-badge" title="Балл появится, когда порешаешь задания в тренажёре">
+                        <div className="score-num muted">—</div>
+                        <div className="score-cap">нет данных</div>
+                      </div>
+                    ))}
                 </div>
                 <div className="pbar big"><span style={{ width: `${pct}%` }} /></div>
                 <div className="row small" style={{ marginTop: 7 }}>
@@ -227,13 +259,27 @@ export default function ProgressScreen() {
                   <div className="spacer" />
                   <b>{pct}%</b>
                 </div>
-                {showEstimate && (
-                  <div className="score-scale">
-                    <div className="scg"><span className="scg-n">{g.current}</span><span className="scg-l">старт</span></div>
-                    <div className="scg-arrow">→</div>
-                    <div className="scg"><span className="scg-n accent">≈{est}</span><span className="scg-l">сейчас</span></div>
-                    <div className="scg-arrow">→</div>
-                    <div className="scg"><span className="scg-n">{g.target}</span><span className="scg-l">цель</span></div>
+                {showEstimate && est && (
+                  <>
+                    {/* Диапазон вместо одной цифры: слева — то, что уже доказано решениями,
+                        справа — если непроверенная часть пойдёт так же. */}
+                    <div className="score-scale">
+                      <div className="scg"><span className="scg-n">{est.floorTest}</span><span className="scg-l">по решённому</span></div>
+                      <div className="scg-arrow">→</div>
+                      <div className="scg"><span className="scg-n accent">≈{est.testScore}</span><span className="scg-l">если так же дальше</span></div>
+                      <div className="scg-arrow">→</div>
+                      <div className="scg"><span className="scg-n">{g.target}</span><span className="scg-l">цель</span></div>
+                    </div>
+                    <div className="small muted" style={{ marginTop: 7 }}>
+                      Проверено {Math.round(est.coverage * 100)}% работы · {countOf(est.attempts, ['решение', 'решения', 'решений'])}
+                      {trust === 'weak' && <> · <b>данных мало, цифра пляшет</b></>}
+                    </div>
+                  </>
+                )}
+                {showEstimate && !est && (
+                  <div className="small muted" style={{ marginTop: 7 }}>
+                    Балла пока нет — он считается по решённым заданиям в тренажёре. Отметки в плане
+                    его не двигают.
                   </div>
                 )}
               </div>

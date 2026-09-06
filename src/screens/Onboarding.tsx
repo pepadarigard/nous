@@ -3,7 +3,7 @@ import { useStore } from '../store'
 import { SUBJECTS, WEEKDAYS, subjectName } from '../data/subjects'
 import { checkApiKey, humanError, isTauri, openExternal } from '../lib/api'
 import { modelLabel, pickBestModel } from '../lib/models'
-import { ONBOARDING_PROVIDERS, PROVIDERS, PROVIDER_ORDER, keyOf, keyPatch, normProvider } from '../lib/providers'
+import { ONBOARDING_PROVIDERS, PROVIDERS, PROVIDER_ORDER, isLocal, keyOf, keyPatch, normProvider } from '../lib/providers'
 import type { Provider } from '../types'
 import { EGE_YEAR, EXAM_DATE_DEFAULT } from '../data/ege2027'
 import PlanImporter from './PlanImporter'
@@ -100,6 +100,12 @@ export default function Onboarding() {
     store.setConfig({ ...cfg, provider: prov, textModel: model, modelAutoPicked: true })
     setStep('subjects')
   }
+  // ИИ — не обязателен: без ключа приложение всё равно строит план, хранит материалы и гоняет по заданиям.
+  function skipSetup() {
+    store.setConfig({ provider: prov, textModel: PROVIDERS[prov].defaultModel })
+    setStep('subjects')
+  }
+
   function saveSubjectsAndNext() {
     store.setStudentName(name)
     store.setSubjects(sel)
@@ -174,12 +180,13 @@ export default function Onboarding() {
               <h1 style={{ margin: 0, fontSize: 24 }}>Настройка ИИ</h1>
             </div>
             <p className="muted" style={{ marginTop: 0 }}>
-              ИИ работает на твоём бесплатном ключе. Выбери сервис:
+              ИИ здесь — помощник, а не условие: план, расписание, свои материалы и тренажёр работают и без него.
+              Хочешь подключить — выбери сервис (ключ бесплатный) или локальную модель, которой ключ вообще не нужен.
             </p>
             <div className="grid cols-2" style={{ marginBottom: 10 }}>
               {ONBOARDING_PROVIDERS.map((p) => (
                 <div key={p} className={'subject-card' + (prov === p ? ' sel' : '')} onClick={() => { setProv(p); setCheckMsg(null) }}>
-                  <span className="emoji">{p === 'openrouter' ? '🌍' : p === 'siliconflow' ? '🧪' : p === 'zhipu' ? '🧠' : '🚀'}</span>
+                  <span className="emoji">{p === 'openrouter' ? '🌍' : p === 'ollama' ? '💻' : p === 'siliconflow' ? '🧪' : p === 'zhipu' ? '🧠' : '🚀'}</span>
                   <div>
                     <div style={{ fontWeight: 700 }}>{PROVIDERS[p].name}</div>
                     <div className="small muted">{PROVIDERS[p].hint}</div>
@@ -191,34 +198,57 @@ export default function Onboarding() {
             <p className="small muted" style={{ marginTop: 0 }}>
               Ещё провайдеры (NVIDIA, DeepInfra, Novita, GitHub, Groq) — потом в Настройках.
             </p>
-            <p className="small muted" style={{ marginTop: 0 }}>
-              Получить бесплатный ключ {pInfo.name}:{' '}
-              <a href={pInfo.keysUrl} onClick={(e) => { e.preventDefault(); openExternal(pInfo.keysUrl) }}>
-                {pInfo.keysUrl.replace('https://', '')}
-              </a>{' '}
-              (регистрация → создай API-ключ → скопируй)
-            </p>
-            <label className="field">
-              <span><KeyRound size={13} style={{ verticalAlign: -2, marginRight: 5 }} />API-ключ {pInfo.name}</span>
-              <input
-                className="input"
-                type="password"
-                placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'вставь ключ'}
-                value={apiKey}
-                onChange={(e) => { setApiKey(e.target.value); setCheckMsg(null) }}
-              />
-            </label>
+            {isLocal(prov) ? (
+              <div className="info-banner" style={{ marginBottom: 12 }}>
+                <span style={{ fontSize: 16 }}>💻</span>
+                <div className="small" style={{ flex: 1 }}>
+                  <b>Ключ не нужен.</b> Поставь{' '}
+                  <a href={pInfo.keysUrl} onClick={(e) => { e.preventDefault(); openExternal(pInfo.keysUrl) }}>Ollama</a>{' '}
+                  и скачай модель командой <code>ollama pull llama3.1:8b</code> — ИИ будет работать прямо на твоём компьютере,
+                  без интернета и лимитов. Можно и позже, из Настроек.
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="small muted" style={{ marginTop: 0 }}>
+                  Получить бесплатный ключ {pInfo.name}:{' '}
+                  <a href={pInfo.keysUrl} onClick={(e) => { e.preventDefault(); openExternal(pInfo.keysUrl) }}>
+                    {pInfo.keysUrl.replace('https://', '')}
+                  </a>{' '}
+                  (регистрация → создай API-ключ → скопируй)
+                </p>
+                <label className="field">
+                  <span><KeyRound size={13} style={{ verticalAlign: -2, marginRight: 5 }} />API-ключ {pInfo.name}</span>
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'вставь ключ'}
+                    value={apiKey}
+                    onChange={(e) => { setApiKey(e.target.value); setCheckMsg(null) }}
+                  />
+                </label>
+              </>
+            )}
             <p className="small muted" style={{ marginTop: 0 }}>
               🧠 Модель ИИ подберём автоматически — самую умную из доступных (сменить можно в Настройках).
             </p>
             <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn btn-ghost" onClick={doCheck} disabled={!apiKey || checking}>{checking ? 'Проверяю…' : 'Проверить ключ'}</button>
+              <button className="btn btn-ghost" onClick={doCheck} disabled={(!apiKey && !isLocal(prov)) || checking}>
+                {checking ? 'Проверяю…' : isLocal(prov) ? 'Проверить подключение' : 'Проверить ключ'}
+              </button>
               {checkMsg && <span className="small" style={{ color: checkMsg.ok ? 'var(--success)' : 'var(--danger)' }}>{checkMsg.ok ? '✓ ' : '✕ '}{checkMsg.text}</span>}
             </div>
             <div className="divider" />
-            <div className="row">
+            <div className="row wrap">
+              <button className="btn btn-ghost" onClick={skipSetup}>Пока без ИИ</button>
               <div className="spacer" />
-              <button className="btn btn-primary btn-lg" disabled={!apiKey.trim()} onClick={saveSetupAndNext}>Продолжить <ArrowRight size={17} /></button>
+              <button
+                className="btn btn-primary btn-lg"
+                disabled={!apiKey.trim() && !isLocal(prov)}
+                onClick={isLocal(prov) ? skipSetup : saveSetupAndNext}
+              >
+                Продолжить <ArrowRight size={17} />
+              </button>
             </div>
             {!isTauri && <p className="small muted" style={{ marginTop: 14 }}>Ты в браузере (разработка): вставь план в формате JSON — разложится и без ключа.</p>}
           </div>

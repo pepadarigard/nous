@@ -1,11 +1,13 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, CalendarDays, TrendingUp, MessageCircle, Settings as Cog, Trophy } from 'lucide-react'
+import { LayoutDashboard, CalendarDays, Library, Target, TrendingUp, MessageCircle, Settings as Cog, Trophy } from 'lucide-react'
 import { useStore } from '../store'
 import { computeStats } from '../lib/stats'
 
 const nav = [
   { to: '/', label: 'Главная', icon: LayoutDashboard, end: true },
   { to: '/plan', label: 'План', icon: CalendarDays },
+  { to: '/materials', label: 'Материалы', icon: Library },
+  { to: '/trainer', label: 'Тренажёр', icon: Target },
   { to: '/progress', label: 'Прогресс', icon: TrendingUp },
   { to: '/chat', label: 'Чат с ИИ', icon: MessageCircle },
   { to: '/settings', label: 'Настройки', icon: Cog },

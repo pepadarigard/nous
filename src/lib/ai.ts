@@ -9,7 +9,7 @@ import { activeKey } from './providers'
 import { SUBJECTS, subjectName, WEEKDAYS } from '../data/subjects'
 import { EGE_YEAR, egeSpec } from '../data/ege2027'
 
-function useMock(): boolean {
+export function isMock(): boolean {
   if (isTauri) return false
   try {
     return localStorage.getItem('ege_real_ai') !== '1'
@@ -176,13 +176,13 @@ function extractJson(text: string): any {
   throw new Error('Не удалось разобрать JSON')
 }
 
-interface CallOpts {
+export interface CallOpts {
   system: string
   user: string
   temperature?: number
   maxTokens?: number
 }
-async function callJSON(cfg: AppConfig, opts: CallOpts): Promise<any> {
+export async function callJSON(cfg: AppConfig, opts: CallOpts): Promise<any> {
   const base: GroqBody = {
     model: cfg.textModel,
     messages: [
@@ -326,7 +326,7 @@ export async function importPlan(cfg: AppConfig, text: string, onProgress?: (m: 
   const hasBlocks = data && Array.isArray(data.blocks) && data.blocks.length > 0
 
   if (!hasBlocks) {
-    if (useMock()) {
+    if (isMock()) {
       return { blocks: mockBlocks('math_prof', 'Импортированный план'), subjects: ['math_prof'], overview: 'Демо-план (в браузере ИИ выключен).' }
     }
     onProgress?.('Привожу план к нужному виду через ИИ…')
@@ -419,7 +419,7 @@ async function generateSubject(cfg: AppConfig, input: PromptInput, sid: string, 
  * общее время ≈ времени одного предмета, а не суммы (главное ускорение).
  */
 export async function generatePlanInApp(cfg: AppConfig, input: PromptInput, onProgress?: (m: string) => void): Promise<ImportResult> {
-  if (useMock()) {
+  if (isMock()) {
     const sid = input.subjects[0] || 'math_prof'
     return {
       blocks: input.subjects.flatMap((s, i) => mockBlocks(s, subjectName(s)).map((b, j) => ({ ...b, order: i * 10 + j }))),
@@ -457,7 +457,7 @@ export async function editPlan(cfg: AppConfig, plan: StudyPlan, wish: string, on
   const req = wish.trim()
   if (!req) return []
   onProgress?.('ИИ переделывает план…')
-  if (useMock()) {
+  if (isMock()) {
     // Демо: переворачиваем порядок блоков, чтобы изменение было видно.
     return [...plan.blocks].reverse().map((b, i) => ({ ...b, order: i }))
   }
@@ -547,7 +547,7 @@ function tutorSystem(studentCtx?: string): string {
 
 /** Чат-репетитор. studentCtx — краткая справка об ученике (предметы, баллы, цели), чтобы отвечать точнее. */
 export async function tutorChat(cfg: AppConfig, messages: { role: string; content: string }[], studentCtx?: string): Promise<string> {
-  if (useMock()) return 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
+  if (isMock()) return 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
   const resp = await groqRawRetry(cfg, {
     model: cfg.textModel,
     messages: [{ role: 'system', content: tutorSystem(studentCtx) }, ...messages],
@@ -569,7 +569,7 @@ export async function tutorChatStream(
   studentCtx: string | undefined,
   onDelta: (chunk: string) => void,
 ): Promise<string> {
-  if (useMock()) {
+  if (isMock()) {
     const demo = 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
     onDelta(demo)
     return demo
@@ -593,7 +593,7 @@ export async function tutorChatStream(
       },
     )
     return cleanMath(full, true)
-  } catch (e) {
+  } catch {
     if (acc) return cleanMath(acc, true) // стрим оборвался на середине — отдаём, что успели
     return await tutorChat(cfg, messages, studentCtx)
   }
@@ -611,7 +611,7 @@ export async function extendPlan(cfg: AppConfig, plan: StudyPlan, wish: string, 
   const startOrder = plan.blocks.length
   const idSet = new Set(SUBJECTS.map((s) => s.id))
   const fallbackSubject = plan.blocks[0]?.subjectId || SUBJECTS[0].id
-  if (useMock()) {
+  if (isMock()) {
     return mockBlocks(fallbackSubject, `Дополнение: ${add}`).map((b, i) => ({ ...b, order: startOrder + i }))
   }
   const covered = plan.blocks.map((b) => `${subjectName(b.subjectId)}: ${b.title}`).slice(0, 60).join('; ')

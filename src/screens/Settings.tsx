@@ -2,14 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { checkApiKey, humanError, isTauri, openExternal, saveState } from '../lib/api'
 import { chatModels, modelLabel, modelScore, pickBestModel } from '../lib/models'
-import { PROVIDERS, PROVIDER_ORDER, activeKey, keyOf, keyPatch, normProvider } from '../lib/providers'
+import { PROVIDERS, PROVIDER_ORDER, activeKey, isLocal, keyOf, keyPatch, normProvider } from '../lib/providers'
 import { appVersion, checkUpdate, GITHUB_URL, type UpdateInfo } from '../lib/update'
 import { subjectName } from '../data/subjects'
 import type { AppData, Provider } from '../types'
 import Modal from '../ui/Modal'
 import PlanImporter from './PlanImporter'
 import PlanExtender from './PlanExtender'
-import { KeyRound, RefreshCw, AlertTriangle, Wand2, Download, Upload, ExternalLink, FolderOpen } from 'lucide-react'
+import ScheduleSetup from './ScheduleSetup'
+import { CalendarRange, KeyRound, RefreshCw, AlertTriangle, Wand2, Download, Upload, ExternalLink, FolderOpen } from 'lucide-react'
 
 const selProv = { borderColor: 'var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-text)', fontWeight: 700 }
 
@@ -35,6 +36,7 @@ export default function Settings() {
   const [importOpen, setImportOpen] = useState(false)
   const [refineOpen, setRefineOpen] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
+  const [schedOpen, setSchedOpen] = useState(false)
 
   // Данные: экспорт/импорт
   const fileRef = useRef<HTMLInputElement>(null)
@@ -70,7 +72,7 @@ export default function Settings() {
     const def = PROVIDERS[p].defaultModel
     setTextModel(def) // модель прошлого провайдера здесь не работает
     setConfig({ provider: p, textModel: def })
-    const k = keys[p]
+    const k = isLocal(p) ? 'local' : keys[p]
     if (k || p === 'openrouter') {
       // у OpenRouter список моделей публичный — подтянем даже без ключа
       checkApiKey(k, p).then((r) => {
@@ -120,9 +122,13 @@ export default function Settings() {
   async function check() {
     setChecking(true)
     setCheckMsg(null)
-    const r = await checkApiKey(apiKey, prov)
+    const r = await checkApiKey(isLocal(prov) ? 'local' : apiKey, prov)
     setChecking(false)
-    setCheckMsg(r.ok ? { ok: true, text: `Рабочий. Моделей: ${r.models?.length ?? '?'}` } : { ok: false, text: humanError(r.error || 'Ошибка') })
+    setCheckMsg(
+      r.ok
+        ? { ok: true, text: isLocal(prov) ? `На связи. Моделей: ${r.models?.length ?? '?'}` : `Рабочий. Моделей: ${r.models?.length ?? '?'}` }
+        : { ok: false, text: isLocal(prov) ? 'Локальный сервер не отвечает — запущен ли он?' : humanError(r.error || 'Ошибка') },
+    )
     if (r.models?.length) setAvailable(r.models)
   }
 
@@ -222,12 +228,29 @@ export default function Settings() {
         </div>
         <p className="small muted" style={{ marginTop: 0 }}>
           {pInfo.name}: {pInfo.hint}.{' '}
-          <a href={pInfo.keysUrl} onClick={(e) => { e.preventDefault(); openExternal(pInfo.keysUrl) }}>Получить ключ {pInfo.name}</a>
+          <a href={pInfo.keysUrl} onClick={(e) => { e.preventDefault(); openExternal(pInfo.keysUrl) }}>
+            {isLocal(prov) ? 'Скачать ' + pInfo.name.replace(' (локально)', '') : 'Получить ключ ' + pInfo.name}
+          </a>
         </p>
-        <label className="field">
-          <span>API-ключ {pInfo.name}</span>
-          <input className="input" type="password" value={apiKey} onChange={(e) => onKeyInput(e.target.value)} onBlur={saveKeyNow} placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'вставь ключ'} />
-        </label>
+        {isLocal(prov) ? (
+          <div className="info-banner" style={{ marginBottom: 12 }}>
+            <span style={{ fontSize: 16 }}>💻</span>
+            <div className="small" style={{ flex: 1 }}>
+              <b>Ключ не нужен.</b> Модель крутится на твоём компьютере, запросы никуда не уходят.
+              {prov === 'ollama' ? (
+                <> Поставь <a href="https://ollama.com/download" onClick={(e) => { e.preventDefault(); openExternal('https://ollama.com/download') }}>Ollama</a>,
+                  затем в терминале: <code>ollama pull llama3.1:8b</code>. Приложение найдёт модель само.</>
+              ) : (
+                <> Запусти в LM Studio вкладку <b>Local Server</b> (порт 1234) с загруженной моделью.</>
+              )}
+            </div>
+          </div>
+        ) : (
+          <label className="field">
+            <span>API-ключ {pInfo.name}</span>
+            <input className="input" type="password" value={apiKey} onChange={(e) => onKeyInput(e.target.value)} onBlur={saveKeyNow} placeholder={pInfo.keyPrefix ? pInfo.keyPrefix + '...' : 'вставь ключ'} />
+          </label>
+        )}
         <label className="field">
           <span>Модель</span>
           <select className="select" value={textModel} onChange={(e) => setTextModel(e.target.value)}>
@@ -258,7 +281,9 @@ export default function Settings() {
         )}
         <div className="row">
           <button className="btn btn-primary" onClick={save}>{saved ? 'Сохранено ✓' : 'Сохранить'}</button>
-          <button className="btn btn-ghost" onClick={check} disabled={!apiKey || checking}>{checking ? 'Проверяю…' : 'Проверить ключ'}</button>
+          <button className="btn btn-ghost" onClick={check} disabled={(!apiKey && !isLocal(prov)) || checking}>
+            {checking ? 'Проверяю…' : isLocal(prov) ? 'Проверить подключение' : 'Проверить ключ'}
+          </button>
           {checkMsg && <span className="small" style={{ color: checkMsg.ok ? 'var(--success)' : 'var(--danger)' }}>{checkMsg.ok ? '✓ ' : '✕ '}{checkMsg.text}</span>}
         </div>
       </div>
@@ -326,6 +351,15 @@ export default function Settings() {
       </div>
 
       <div className="card" style={{ marginBottom: 18 }}>
+        <h3><CalendarRange size={16} style={{ verticalAlign: -2, marginRight: 6 }} />Расписание</h3>
+        <p className="small muted" style={{ marginTop: 0 }}>
+          Дни занятий по каждому предмету, сколько занятий в день, выходные и каникулы. Занятия, перенесённые руками,
+          остаются на своих датах.
+        </p>
+        <button className="btn" onClick={() => setSchedOpen(true)}><CalendarRange size={15} /> Настроить расписание</button>
+      </div>
+
+      <div className="card" style={{ marginBottom: 18 }}>
         <h3>Данные</h3>
         <p className="small muted" style={{ marginTop: 0 }}>
           Бэкап одним файлом: план, прогресс, достижения и настройки. Пригодится при переустановке или переносе на другой ПК.
@@ -386,6 +420,11 @@ export default function Settings() {
       {refineOpen && (
         <Modal title="Изменить план" onClose={() => setRefineOpen(false)}>
           <PlanExtender onDone={() => setRefineOpen(false)} />
+        </Modal>
+      )}
+      {schedOpen && (
+        <Modal title="Расписание" onClose={() => setSchedOpen(false)} wide>
+          <ScheduleSetup />
         </Modal>
       )}
       {confirmReset && (

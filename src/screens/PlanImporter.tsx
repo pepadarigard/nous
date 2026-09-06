@@ -3,8 +3,12 @@ import { useStore } from '../store'
 import { buildPlanPrompt, importPlan, generatePlanInApp, type ImportResult } from '../lib/ai'
 import { subjectById } from '../data/subjects'
 import type { Block } from '../types'
-import { Copy, ArrowRight, ExternalLink, PartyPopper, Zap } from 'lucide-react'
+import { Copy, ArrowRight, ExternalLink, PartyPopper, Zap, WifiOff } from 'lucide-react'
 import { humanError, openExternal } from '../lib/api'
+import { buildOfflinePlan, offlinePlanSize } from '../lib/offlinePlan'
+import { hasTaskMap } from '../data/egeTasks'
+import { weakSpots } from '../lib/bank'
+import { countOf } from '../lib/plural'
 
 // Сводка по разложенному плану: сколько занятий и до какой даты его хватит по расписанию.
 interface SummaryRow {
@@ -53,6 +57,9 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
     })
   }
 
+  const offlineSubjects = (store.data.subjects.length ? store.data.subjects : ['russian']).filter(hasTaskMap)
+  const offlineSize = offlineSubjects.length ? offlinePlanSize(offlineSubjects) : 0
+
   const prompt = buildPlanPrompt({
     subjects: store.data.subjects,
     goals: store.data.goals,
@@ -87,6 +94,23 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
     store.ensureSubjectSetup(subs) // новым предметам — дефолтные цель и расписание
     store.setPlan({ createdAt: new Date().toISOString(), examDate: store.data.examDate, overview: res.overview, blocks: res.blocks })
     setSummary(buildSummary(res.blocks)) // сводка вместо мгновенного закрытия
+  }
+
+  // План без ИИ: по структуре КИМ. Работает всегда — без ключа, без сети, мгновенно.
+  function buildOffline() {
+    const subjects = (store.data.subjects.length ? store.data.subjects : ['russian']).filter(hasTaskMap)
+    if (!subjects.length) return
+    // Слабые места из тренажёра дают дополнительную практику по нужным номерам.
+    const weakTaskNos: Record<string, number[]> = {}
+    for (const w of weakSpots(store.data.attempts ?? [], 12)) {
+      if (!w.taskNo) continue
+      if (!weakTaskNos[w.subjectId]) weakTaskNos[w.subjectId] = []
+      weakTaskNos[w.subjectId].push(w.taskNo)
+    }
+    const plan = buildOfflinePlan({ subjects, examDate: store.data.examDate, weakTaskNos })
+    store.ensureSubjectSetup(subjects)
+    store.setPlan(plan)
+    setSummary(buildSummary(plan.blocks))
   }
 
   async function importIt() {
@@ -177,6 +201,31 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
 
   return (
     <div>
+      <div className="card soft" style={{ marginBottom: 18 }}>
+        <div className="row" style={{ gap: 10, marginBottom: 6 }}>
+          <WifiOff size={17} color="var(--accent)" />
+          <b>Без ИИ и без интернета</b>
+        </div>
+        <p className="small muted" style={{ marginTop: 0 }}>
+          Соберу план прямо здесь — по структуре экзамена: каждое задание КИМ закрывается теорией,
+          практикой и повторением. Если в тренажёре уже копится статистика, по слабым номерам добавлю
+          лишний подход. План потом можно править руками или отдать ИИ на доработку.
+        </p>
+        {offlineSubjects.length === 0 ? (
+          <p className="small" style={{ color: 'var(--warn)', margin: 0 }}>
+            Готовая структура пока есть для русского, профильной математики, информатики и физики —
+            для твоих предметов собери план через ИИ или вставь свой.
+          </p>
+        ) : (
+          <div className="row wrap" style={{ gap: 10 }}>
+            <button className="btn btn-primary" onClick={buildOffline}>Собрать план по структуре ЕГЭ</button>
+            <span className="small muted">
+              {offlineSubjects.map((id) => subjectById(id)?.short ?? id).join(', ')} · примерно {countOf(offlineSize, ['занятие', 'занятия', 'занятий'])}
+            </span>
+          </div>
+        )}
+      </div>
+
       <div className="row" style={{ gap: 8 }}>
         {chip('Шаг 1')}
         <h3 style={{ margin: 0 }}>Скопируй промт и вставь его в ИИ</h3>

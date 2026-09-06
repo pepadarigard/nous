@@ -14,6 +14,24 @@ export interface ProviderInfo {
 }
 
 export const PROVIDERS: Record<Provider, ProviderInfo> = {
+  ollama: {
+    id: 'ollama',
+    name: 'Ollama (локально)',
+    base: 'http://localhost:11434/v1',
+    keysUrl: 'https://ollama.com/download',
+    keyPrefix: '',
+    hint: 'модель работает на твоём компьютере — без ключа, без интернета и без лимитов',
+    defaultModel: 'llama3.1:8b',
+  },
+  lmstudio: {
+    id: 'lmstudio',
+    name: 'LM Studio (локально)',
+    base: 'http://localhost:1234/v1',
+    keysUrl: 'https://lmstudio.ai',
+    keyPrefix: '',
+    hint: 'локальный сервер LM Studio; включи в нём Local Server',
+    defaultModel: 'local-model',
+  },
   openrouter: {
     id: 'openrouter',
     name: 'OpenRouter',
@@ -98,10 +116,22 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
 }
 
 /** Порядок показа в интерфейсе (лучшие для России — первыми). */
-export const PROVIDER_ORDER: Provider[] = ['openrouter', 'siliconflow', 'zhipu', 'cerebras', 'nvidia', 'deepinfra', 'novita', 'github', 'groq']
+export const PROVIDER_ORDER: Provider[] = ['openrouter', 'ollama', 'lmstudio', 'siliconflow', 'zhipu', 'cerebras', 'nvidia', 'deepinfra', 'novita', 'github', 'groq']
+
+/** Локальные провайдеры: работают без ключа и без интернета. */
+export const LOCAL_PROVIDERS: Provider[] = ['ollama', 'lmstudio']
+
+export function isLocal(p?: string): boolean {
+  return LOCAL_PROVIDERS.includes(normProvider(p))
+}
+
+/** Готов ли ИИ к работе: локальной модели ключ не нужен. */
+export function aiReady(cfg: AppConfig): boolean {
+  return isLocal(cfg.provider) || !!activeKey(cfg)
+}
 
 /** В онбординге показываем только топ — остальные доступны в Настройках. */
-export const ONBOARDING_PROVIDERS: Provider[] = ['openrouter', 'siliconflow', 'zhipu', 'cerebras']
+export const ONBOARDING_PROVIDERS: Provider[] = ['openrouter', 'ollama', 'siliconflow', 'zhipu']
 
 // Запасные бесплатные модели OpenRouter: если выбранная перегружена (429 upstream),
 // OpenRouter сам переключится (поле `models`, МАКСИМУМ 3 элемента!).
@@ -123,9 +153,10 @@ export function providerOf(cfg: AppConfig): ProviderInfo {
   return PROVIDERS[normProvider(cfg.provider)]
 }
 
-/** Активный ключ под выбранного провайдера. */
+/** Активный ключ под выбранного провайдера. Локальным моделям ключ не нужен. */
 export function activeKey(cfg: AppConfig): string {
   const p = normProvider(cfg.provider)
+  if (LOCAL_PROVIDERS.includes(p)) return 'local'
   if (p === 'groq') return cfg.apiKey
   if (p === 'openrouter') return cfg.apiKeyOr || ''
   if (p === 'cerebras') return cfg.apiKeyCb || ''

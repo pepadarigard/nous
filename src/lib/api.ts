@@ -201,6 +201,66 @@ export async function checkApiKey(apiKey: string, provider: Provider = 'groq'): 
   }
 }
 
+// ---------- Свои материалы ----------
+//
+// Оригиналы и извлечённый текст лежат ФАЙЛАМИ рядом с приложением, а не в состоянии:
+// иначе state.json распухнет от текста учебников. В браузере (разработка) оригиналы
+// не сохраняются, текст живёт в localStorage.
+
+const matTextKey = (id: string) => 'nous_mat_text_' + id
+
+/** ArrayBuffer → base64 кусками (иначе на больших файлах переполняется стек). */
+function bytesToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  const CHUNK = 0x8000
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(bin)
+}
+
+/** Сохранить оригинал файла. Возвращает путь или null, если сохранение недоступно. */
+export async function saveMaterialFile(fileName: string, buf: ArrayBuffer): Promise<string | null> {
+  if (!isTauri) return null
+  return await invoke<string>('save_material', { fileName, dataB64: bytesToBase64(buf) })
+}
+
+/** Сохранить извлечённый текст материала. */
+export async function saveMaterialText(id: string, text: string): Promise<void> {
+  if (isTauri) {
+    await invoke('save_material_text', { id, text })
+    return
+  }
+  try {
+    localStorage.setItem(matTextKey(id), text)
+  } catch {
+    /* в браузере текст может не влезть в квоту — не страшно, это режим разработки */
+  }
+}
+
+/** Прочитать текст материала. */
+export async function loadMaterialText(id: string): Promise<string | null> {
+  if (isTauri) return await invoke<string | null>('load_material_text', { id })
+  return localStorage.getItem(matTextKey(id))
+}
+
+/** Удалить файлы материала. */
+export async function deleteMaterialFiles(id: string, fileName?: string): Promise<void> {
+  if (isTauri) {
+    await invoke('delete_material', { id, fileName: fileName ?? null })
+    return
+  }
+  localStorage.removeItem(matTextKey(id))
+}
+
+/** Открыть оригинал системной программой. */
+export async function openMaterialFile(fileName: string): Promise<void> {
+  if (!isTauri) throw new Error('Открытие файла доступно в приложении, а не в браузере')
+  const path = await invoke<string>('material_path', { fileName })
+  await invoke('open_file', { path })
+}
+
 /** Уникальный id без внешних зависимостей. */
 export function uid(prefix = ''): string {
   return prefix + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)

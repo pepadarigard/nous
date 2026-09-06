@@ -17,6 +17,7 @@ build_log.txt
 src-tauri/target/
 
 # Editor directories and files
+.claude/
 .vscode/*
 !.vscode/extensions.json
 .idea

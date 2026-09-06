@@ -7,11 +7,11 @@ import { Wand2, RefreshCw, Shuffle } from 'lucide-react'
 type Mode = 'add' | 'edit'
 
 // «Изменить план»: дополнить новыми занятиями ИЛИ переделать существующее (порядок, наполнение, состав).
-export default function PlanExtender({ onDone }: { onDone: () => void }) {
+export default function PlanExtender({ onDone, initialWish }: { onDone: () => void; initialWish?: string }) {
   const store = useStore()
   const plan = store.data.plan
   const [mode, setMode] = useState<Mode>('add')
-  const [wish, setWish] = useState('')
+  const [wish, setWish] = useState(initialWish ?? '')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [resultMsg, setResultMsg] = useState('')

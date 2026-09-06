@@ -3,9 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { subjectById } from '../data/subjects'
 import type { Block, Lesson } from '../types'
-import { agendaByDate, blockColors, type AgendaItem } from '../lib/schedule'
+import { agendaByDate, blockColors, dayLabel, eventsByDate, type AgendaItem } from '../lib/schedule'
 import { currentStreak } from '../lib/stats'
+import { reviewSummary } from '../lib/review'
+import { countOf } from '../lib/plural'
 import LessonDetail from './LessonDetail'
+import WeekReview from './WeekReview'
 import { Flame, CalendarClock, CheckCircle2, Target, RotateCcw, ArrowRight, Check } from 'lucide-react'
 
 type Open = (blockId: string, lessonId: string) => void
@@ -39,6 +42,7 @@ export default function Home() {
   const nav = useNavigate()
   const data = useStore((s) => s.data)
   const toggleLesson = useStore((s) => s.toggleLesson)
+  const toggleEvent = useStore((s) => s.toggleEvent)
   const [detail, setDetail] = useState<{ blockId: string; lessonId: string } | null>(null)
   const onOpen: Open = (blockId, lessonId) => setDetail({ blockId, lessonId })
   const plan = data.plan
@@ -59,15 +63,19 @@ export default function Home() {
   const done = allPairs.filter((x) => x.lesson.done).length
   const pct = total ? Math.round((done / total) * 100) : 0
   const streak = currentStreak(data.progress) // единая логика со «Прогрессом»: только реальные занятия
+  const due = reviewSummary(data.questions ?? [], data.attempts ?? [])
   let daysLeft: number | null = null
   if (data.examDate) daysLeft = Math.ceil((new Date(data.examDate).getTime() - Date.now()) / 86400000)
 
-  const agenda = agendaByDate(plan, data.schedules)
+  const agenda = agendaByDate(plan, data.schedules, data.rules)
   const todayISO = iso(new Date())
   const today: AgendaItem[] = agenda[todayISO] || []
   const tmr = new Date()
   tmr.setDate(tmr.getDate() + 1)
   const tomorrow: AgendaItem[] = agenda[iso(tmr)] || []
+  const evMap = eventsByDate(data.events ?? [])
+  const todayEvents = evMap[todayISO] || []
+  const tomorrowEvents = evMap[iso(tmr)] || []
   // Будущих занятий не осталось — план кончился, пора дописать или обновить.
   const planEnded = !Object.keys(agenda).some((k) => k >= todayISO && agenda[k].length > 0)
 
@@ -114,15 +122,61 @@ export default function Home() {
         </div>
       </div>
 
+      <WeekReview />
+
+      {/* Интервальное повторение: то, в чём ошибся, возвращается по расписанию.
+          Это про ЗАДАНИЯ из тренажёра — не путать с блоком «Что повторить» ниже,
+          там занятия плана. */}
+      {due.tracked > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="row wrap" style={{ gap: 10 }}>
+            <RotateCcw size={17} color="var(--accent)" />
+            <b>Повторить задания</b>
+            {due.due > 0 ? (
+              <span className="small muted">
+                — {countOf(due.due, ['задание ждёт', 'задания ждут', 'заданий ждут'])} повторения. Дальше
+                интервал растёт: день, три, неделя.
+              </span>
+            ) : (
+              <span className="small muted">
+                — на сегодня всё повторено
+                {due.nextISO && <> · следующее {dayLabel(due.nextISO).toLowerCase()}</>}
+              </span>
+            )}
+            <div className="spacer" />
+            {due.due > 0 && (
+              <button className="btn btn-primary btn-sm" onClick={() => nav('/trainer?mode=review')}>
+                Повторить {due.due} <ArrowRight size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="grid cols-2 stagger" style={{ alignItems: 'start' }}>
         <div className="card">
           <div className="row" style={{ marginBottom: 12 }}>
             <h3 style={{ margin: 0 }}>📌 Сегодня</h3>
             <div className="spacer" />
-            <span className="chip">{today.length}</span>
+            <span className="chip">{today.length + todayEvents.length}</span>
           </div>
+          {todayEvents.map((ev) => (
+            <div key={ev.id} className={'lesson ev-row' + (ev.done ? ' done' : '')} style={{ borderLeft: '4px dashed var(--muted-2)' }}>
+              <div className="kind-ic" style={{ background: 'var(--panel-2)', borderColor: 'transparent' }}>📌</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 650, textDecoration: ev.done ? 'line-through' : 'none' }}>
+                  {ev.time ? <span className="muted" style={{ marginRight: 6 }}>{ev.time}</span> : null}
+                  {ev.title}
+                </div>
+                <div className="small muted">Своё дело{ev.note ? ' · ' + ev.note : ''}</div>
+              </div>
+              <div className="tick" onClick={() => toggleEvent(ev.id)}>{ev.done && <Check size={15} color="#fff" />}</div>
+            </div>
+          ))}
           {today.length === 0 ? (
-            <p className="muted small">На сегодня занятий нет — отдохни или повтори пройденное.</p>
+            <p className="muted small">
+              {todayEvents.length ? 'Занятий плана на сегодня нет — только свои дела.' : 'На сегодня занятий нет — отдохни или повтори пройденное.'}
+            </p>
           ) : (
             today.map((it) => <Row key={it.lesson.id} block={it.block} lesson={it.lesson} color={it.color} onToggle={toggleLesson} onOpen={onOpen} />)
           )}
@@ -130,8 +184,17 @@ export default function Home() {
           <div className="row" style={{ margin: '18px 0 10px' }}>
             <h3 style={{ margin: 0, fontSize: 16 }}>🌅 Завтра</h3>
             <div className="spacer" />
-            <span className="chip">{tomorrow.length}</span>
+            <span className="chip">{tomorrow.length + tomorrowEvents.length}</span>
           </div>
+          {tomorrowEvents.map((ev) => (
+            <div key={ev.id} className="lesson ev-row" style={{ borderLeft: '4px dashed var(--muted-2)' }}>
+              <div className="kind-ic" style={{ background: 'var(--panel-2)', borderColor: 'transparent' }}>📌</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 650 }}>{ev.time ? <span className="muted" style={{ marginRight: 6 }}>{ev.time}</span> : null}{ev.title}</div>
+                <div className="small muted">Своё дело</div>
+              </div>
+            </div>
+          ))}
           {tomorrow.length === 0 ? (
             <p className="muted small">Завтра занятий по плану нет.</p>
           ) : (
