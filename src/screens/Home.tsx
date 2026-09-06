@@ -62,7 +62,7 @@ export default function Home() {
   const total = allPairs.length
   const done = allPairs.filter((x) => x.lesson.done).length
   const pct = total ? Math.round((done / total) * 100) : 0
-  const streak = currentStreak(data.progress) // единая логика со «Прогрессом»: только реальные занятия
+  const streak = currentStreak(data.progress, data.attempts ?? []) // единая логика со «Прогрессом»
   const due = reviewSummary(data.questions ?? [], data.attempts ?? [])
   let daysLeft: number | null = null
   if (data.examDate) daysLeft = Math.ceil((new Date(data.examDate).getTime() - Date.now()) / 86400000)

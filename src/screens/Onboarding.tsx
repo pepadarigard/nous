@@ -160,9 +160,12 @@ export default function Onboarding() {
             <h1 className="w-title">Nous</h1>
             <p className="w-tag">Личный штаб подготовки к ЕГЭ {EGE_YEAR}</p>
             <div className="w-feats">
-              <div className="w-feat"><span className="w-ic">🗓</span><div><b>План под тебя</b><span>сильный ИИ раскладывает подготовку по дням — под твои цели и расписание</span></div></div>
-              <div className="w-feat"><span className="w-ic">📈</span><div><b>Виден рост</b><span>уровни, серии, достижения и честный прогресс к баллам мечты</span></div></div>
-              <div className="w-feat"><span className="w-ic">💬</span><div><b>Репетитор 24/7</b><span>объяснит тему и разберёт задание прямо в приложении</span></div></div>
+              {/* Обещаем то, что приложение делает САМО, без ключей и интернета.
+                  ИИ упоминается последним и как дополнение — иначе первый экран
+                  противоречит тому, чем Nous стал. */}
+              <div className="w-feat"><span className="w-ic">🗓</span><div><b>План по структуре ЕГЭ</b><span>собирается за секунду из структуры экзамена — без интернета и без ключей</span></div></div>
+              <div className="w-feat"><span className="w-ic">🎯</span><div><b>Теория и тренажёр внутри</b><span>разбор каждого номера, задания с проверкой ответа и повторение по интервалам</span></div></div>
+              <div className="w-feat"><span className="w-ic">📈</span><div><b>Честный балл</b><span>считается по решённому, а не по галочкам; ИИ можно подключить, но он не обязателен</span></div></div>
             </div>
             <button className="btn btn-primary btn-lg w-cta" onClick={() => setStep('setup')}>
               Начать подготовку <ArrowRight size={18} />

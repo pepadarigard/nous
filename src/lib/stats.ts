@@ -1,7 +1,10 @@
 // Геймификация «Прогресса»: XP/уровни, серии, недельная динамика, тепловая карта активности, достижения.
-// Всё считается ЧЕСТНО — только по реально отмеченным занятиям.
+//
+// Считается по РАБОТЕ, а не по нажатиям: опыт и серию дают и отмеченные занятия,
+// и верно решённые задания. Иначе уровень растёт от галочек, то есть от обещаний, —
+// и это противоречит баллу на «Прогрессе», который считается по решённому.
 
-import type { AppData, LessonKind, ProgressEvent, StudyPlan } from '../types'
+import type { AppData, Attempt, LessonKind, ProgressEvent, StudyPlan } from '../types'
 
 const POINTS: Record<LessonKind, number> = { theory: 8, practice: 12, review: 10 }
 const LEVEL_TITLES = ['Новичок', 'Ученик', 'Знаток', 'Умник', 'Эрудит', 'Мастер', 'Гуру', 'Чемпион', 'Легенда', 'Гений ЕГЭ']
@@ -38,12 +41,23 @@ export function levelInfo(xp: number): LevelInfo {
   return { level, title, xp, intoLevel, span, toNext: span - intoLevel, pct: Math.round((intoLevel / span) * 100) }
 }
 
-function doneDays(events: ProgressEvent[]): Set<string> {
-  return new Set(events.filter((e) => e.type === 'lesson_done').map((e) => new Date(e.at).toDateString()))
+/**
+ * Дни, когда была сделана работа. Считаются И отмеченные занятия, И решённые
+ * задания: иначе можно прорешать полсотни заданий за вечер, и серия не засчитается —
+ * а серия должна отражать работу, а не нажатия на галочки.
+ */
+function doneDays(events: ProgressEvent[], attempts: Attempt[] = []): Set<string> {
+  const days = new Set(
+    events.filter((e) => e.type === 'lesson_done').map((e) => new Date(e.at).toDateString()),
+  )
+  for (const a of attempts) {
+    if (a.correct !== null) days.add(new Date(a.at).toDateString())
+  }
+  return days
 }
 
-export function currentStreak(events: ProgressEvent[]): number {
-  const days = doneDays(events)
+export function currentStreak(events: ProgressEvent[], attempts: Attempt[] = []): number {
+  const days = doneDays(events, attempts)
   let streak = 0
   const cur = new Date()
   if (!days.has(cur.toDateString())) cur.setDate(cur.getDate() - 1)
@@ -54,8 +68,8 @@ export function currentStreak(events: ProgressEvent[]): number {
   return streak
 }
 
-export function bestStreak(events: ProgressEvent[]): number {
-  const keys = [...doneDays(events)].map((s) => new Date(s).getTime()).sort((a, b) => a - b)
+export function bestStreak(events: ProgressEvent[], attempts: Attempt[] = []): number {
+  const keys = [...doneDays(events, attempts)].map((s) => new Date(s).getTime()).sort((a, b) => a - b)
   let best = 0
   let run = 0
   let prev = 0
@@ -154,6 +168,12 @@ export function computeStats(data: AppData): Stats {
   })
   const lifetimeDone = doneEvents.length
 
+  // Решённые задания тоже дают опыт. Иначе уровень растёт ТОЛЬКО от галочек, то есть
+  // от обещаний, — и это противоречит честному баллу, который считается по решённому.
+  // Одно задание дешевле занятия (3 против 8–12), но их и решают десятками.
+  const solvedRight = (data.attempts ?? []).filter((a) => a.correct === true).length
+  xp += solvedRight * 3
+
   // предметов на 100% готовности
   const bySub: Record<string, { d: number; t: number }> = {}
   ;(plan?.blocks || []).forEach((b) => {
@@ -166,11 +186,12 @@ export function computeStats(data: AppData): Stats {
   const subjectsFull = Object.values(bySub).filter((v) => v.t > 0 && v.d === v.t).length
 
   const events = data.progress
-  const streak = currentStreak(events)
-  const best = Math.max(streak, bestStreak(events))
+  const attemptsAll = data.attempts ?? []
+  const streak = currentStreak(events, attemptsAll)
+  const best = Math.max(streak, bestStreak(events, attemptsAll))
   const thisWeek = countInWindow(events, 7, 0)
   const lastWeek = countInWindow(events, 14, 7)
-  const studiedToday = doneDays(events).has(new Date().toDateString())
+  const studiedToday = doneDays(events, attemptsAll).has(new Date().toDateString())
 
   const doneCount = done.length
   const totalCount = lessons.length
@@ -186,6 +207,8 @@ export function computeStats(data: AppData): Stats {
     A('streak7', '🔥', 'Неделя силы', '7 дней подряд', best >= 7),
     A('streak30', '⚡', 'Железная воля', '30 дней подряд', best >= 30),
     A('practice', '✍️', 'Практик', '20 практик решено', byKind.practice >= 20),
+    A('solved50', '🎯', 'Полсотни задач', 'Решить 50 заданий верно', solvedRight >= 50),
+    A('solved200', '🧠', 'Две сотни', 'Решить 200 заданий верно', solvedRight >= 200),
     A('review', '🔁', 'Повторяшка', '10 повторений', byKind.review >= 10),
     A('subject', '🎯', 'Предмет закрыт', 'Довести предмет до 100%', subjectsFull >= 1),
     A('level5', '⭐', 'Пятый уровень', 'Достичь 5 уровня', level.level >= 5),

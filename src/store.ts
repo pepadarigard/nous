@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { AppConfig, AppData, Attempt, Block, LessonBrief, Material, MockResult, PlanEvent, ProgressEvent, Question, ScheduleRules, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
 import { emptyData, emptyRules } from './types'
+import { SEED_BANK } from './data/seedBank'
 import { catchUpPlan } from './lib/schedule'
 import { loadState, saveState, uid, humanError, deleteMaterialFiles } from './lib/api'
 import { tutorChatStream } from './lib/ai'
@@ -395,7 +396,30 @@ export const useStore = create<Store>((set, get) => {
     },
     clearChat: () => set({ chatMsgs: [], chatBusy: false }),
 
-    finishOnboarding: () => commit((d) => ({ ...d, onboarded: true })),
+    // Стартовые задания кладём сразу: иначе тренажёр, повторение и балл стоят
+    // пустыми до тех пор, пока ученик где-то не раздобудет свой банк — а до этого
+    // половина приложения выглядит нерабочей. Добавляем только по выбранным
+    // предметам и только если банк пуст, чтобы не мешать своим заданиям.
+    finishOnboarding: () =>
+      commit((d) => {
+        const next = { ...d, onboarded: true }
+        if (!(d.questions ?? []).length) {
+          const seeds = SEED_BANK.filter((q) => d.subjects.includes(q.subjectId))
+          if (seeds.length) {
+            next.questions = seeds.map((q) => ({
+              id: uid('q_'),
+              subjectId: q.subjectId,
+              taskNo: q.taskNo,
+              topic: q.topic,
+              text: q.text,
+              answer: q.answer,
+              origin: 'import' as const,
+              createdAt: new Date().toISOString(),
+            }))
+          }
+        }
+        return next
+      }),
     // Сброс стирает план/прогресс/предметы, но СОХРАНЯЕТ ключи и настройки ИИ —
     // терять с трудом добытые ключи из-за «начать заново» слишком обидно.
     resetAll: () =>

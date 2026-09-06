@@ -54,7 +54,7 @@ export default function WeekReview() {
       plannedWeek,
       doneWeek,
       overdue: overdueItems(agenda).length,
-      streak: currentStreak(data.progress),
+      streak: currentStreak(data.progress, data.attempts ?? []),
       daysLeft: data.examDate ? Math.max(0, Math.ceil((new Date(data.examDate).getTime() - Date.now()) / 86400000)) : undefined,
       weak,
       subjects: data.goals.map((g) => ({ subjectId: g.subjectId, current: g.current, target: g.target })),
