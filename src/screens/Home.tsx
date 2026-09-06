@@ -3,18 +3,23 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
 import { subjectById } from '../data/subjects'
 import type { Block, Lesson } from '../types'
-import { agendaByDate, blockColors, dayLabel, eventsByDate, type AgendaItem } from '../lib/schedule'
+import { agendaByDate, blockColors, eventsByDate, type AgendaItem } from '../lib/schedule'
 import { currentStreak } from '../lib/stats'
-import { reviewSummary } from '../lib/review'
-import { countOf } from '../lib/plural'
+import { buildToday, type TodayAction } from '../lib/today'
 import LessonDetail from './LessonDetail'
 import WeekReview from './WeekReview'
-import { Flame, CalendarClock, CheckCircle2, Target, RotateCcw, ArrowRight, Check } from 'lucide-react'
+import { Flame, CalendarClock, CheckCircle2, Target, ArrowRight, Check } from 'lucide-react'
 
 type Open = (blockId: string, lessonId: string) => void
 
 const kindIcon: Record<Lesson['kind'], string> = { theory: '📖', practice: '✏️', review: '🔁' }
 const kindLabel: Record<Lesson['kind'], string> = { theory: 'Теория', practice: 'Практика', review: 'Повторение' }
+
+// Вид пункта «Сегодня» — цветом и значком видно, что это за работа, без чтения.
+const todayIcon: Record<string, string> = { review: '🔁', mock: '⏱', lesson: '📖', weak: '🎯', catchup: '⏰' }
+function kindColor(kind: string): string {
+  return kind === 'review' ? '#8b5cf6' : kind === 'mock' ? '#0ea5e9' : kind === 'weak' ? '#f59e0b' : kind === 'catchup' ? '#ef4444' : 'var(--accent)'
+}
 
 function iso(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -41,8 +46,9 @@ function Row({ block, lesson, color, onToggle, onOpen }: { block: Block; lesson:
 export default function Home() {
   const nav = useNavigate()
   const data = useStore((s) => s.data)
-  const toggleLesson = useStore((s) => s.toggleLesson)
   const toggleEvent = useStore((s) => s.toggleEvent)
+  const catchUpOverdue = useStore((s) => s.catchUpOverdue)
+  const [moved, setMoved] = useState(0)
   const [detail, setDetail] = useState<{ blockId: string; lessonId: string } | null>(null)
   const onOpen: Open = (blockId, lessonId) => setDetail({ blockId, lessonId })
   const plan = data.plan
@@ -63,13 +69,11 @@ export default function Home() {
   const done = allPairs.filter((x) => x.lesson.done).length
   const pct = total ? Math.round((done / total) * 100) : 0
   const streak = currentStreak(data.progress, data.attempts ?? []) // единая логика со «Прогрессом»
-  const due = reviewSummary(data.questions ?? [], data.attempts ?? [])
   let daysLeft: number | null = null
   if (data.examDate) daysLeft = Math.ceil((new Date(data.examDate).getTime() - Date.now()) / 86400000)
 
   const agenda = agendaByDate(plan, data.schedules, data.rules)
   const todayISO = iso(new Date())
-  const today: AgendaItem[] = agenda[todayISO] || []
   const tmr = new Date()
   tmr.setDate(tmr.getDate() + 1)
   const tomorrow: AgendaItem[] = agenda[iso(tmr)] || []
@@ -79,7 +83,20 @@ export default function Home() {
   // Будущих занятий не осталось — план кончился, пора дописать или обновить.
   const planEnded = !Object.keys(agenda).some((k) => k >= todayISO && agenda[k].length > 0)
 
-  const review = allPairs.filter((x) => x.lesson.kind === 'review' && !x.lesson.done).slice(0, 5)
+  // Программу на сегодня считает приложение — ученику остаётся идти сверху вниз.
+  const day = buildToday(data)
+
+  function runAction(a: TodayAction) {
+    if (a.type === 'lesson') return onOpen(a.blockId, a.lessonId)
+    if (a.type === 'mock') return nav('/trainer?tab=mock')
+    if (a.type === 'catchup') return setMoved(catchUpOverdue())
+    const p = new URLSearchParams()
+    if (a.review) p.set('mode', 'review')
+    if (a.subjectId) p.set('subject', a.subjectId)
+    if (a.taskNo) p.set('task', String(a.taskNo))
+    nav('/trainer?' + p.toString())
+  }
+
   const recent = allPairs
     .filter((x) => x.lesson.done && x.lesson.completedAt)
     .sort((a, b) => (b.lesson.completedAt || '').localeCompare(a.lesson.completedAt || ''))
@@ -122,70 +139,79 @@ export default function Home() {
         </div>
       </div>
 
-      <WeekReview />
-
-      {/* Интервальное повторение: то, в чём ошибся, возвращается по расписанию.
-          Это про ЗАДАНИЯ из тренажёра — не путать с блоком «Что повторить» ниже,
-          там занятия плана. */}
-      {due.tracked > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="row wrap" style={{ gap: 10 }}>
-            <RotateCcw size={17} color="var(--accent)" />
-            <b>Повторить задания</b>
-            {due.due > 0 ? (
-              <span className="small muted">
-                — {countOf(due.due, ['задание ждёт', 'задания ждут', 'заданий ждут'])} повторения. Дальше
-                интервал растёт: день, три, неделя.
-              </span>
-            ) : (
-              <span className="small muted">
-                — на сегодня всё повторено
-                {due.nextISO && <> · следующее {dayLabel(due.nextISO).toLowerCase()}</>}
-              </span>
-            )}
-            <div className="spacer" />
-            {due.due > 0 && (
-              <button className="btn btn-primary btn-sm" onClick={() => nav('/trainer?mode=review')}>
-                Повторить {due.due} <ArrowRight size={14} />
-              </button>
-            )}
-          </div>
+      {/* Единственный экран, отвечающий на вопрос «что делать». Порядок уже расставлен
+          по приоритету, поэтому ученику не нужно ничего планировать — он идёт сверху вниз. */}
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="row wrap" style={{ marginBottom: 6, gap: 10 }}>
+          <h3 style={{ margin: 0 }}>📌 Сегодня</h3>
+          <div className="spacer" />
+          {day.minutes > 0 && <span className="chip">≈ {day.minutes} мин</span>}
         </div>
-      )}
+        <p className="small muted" style={{ marginTop: 0, marginBottom: 14 }}>{day.headline}</p>
+
+        {day.items.map((it, i) => (
+          <div
+            key={it.id}
+            className={'lesson' + (it.done ? ' done' : '')}
+            style={{ borderLeft: '4px solid ' + kindColor(it.kind), cursor: 'pointer' }}
+            onClick={() => runAction(it.action)}
+          >
+            <div className="kind-ic" style={{ background: kindColor(it.kind) + '22', borderColor: 'transparent' }}>
+              {it.done ? '✓' : todayIcon[it.kind]}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 650, textDecoration: it.done ? 'line-through' : 'none' }}>
+                {!it.done && it.kind !== 'catchup' && (
+                  <span className="muted" style={{ marginRight: 6 }}>{i + 1}.</span>
+                )}
+                {it.title}
+              </div>
+              <div className="small muted">{it.detail}</div>
+            </div>
+            {!it.done && it.minutes > 0 && <span className="small muted">{it.minutes} мин</span>}
+            <ArrowRight size={15} color="var(--muted)" />
+          </div>
+        ))}
+
+        {todayEvents.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            {todayEvents.map((ev) => (
+              <div key={ev.id} className={'lesson ev-row' + (ev.done ? ' done' : '')} style={{ borderLeft: '4px dashed var(--muted-2)' }}>
+                <div className="kind-ic" style={{ background: 'var(--panel-2)', borderColor: 'transparent' }}>📌</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 650, textDecoration: ev.done ? 'line-through' : 'none' }}>
+                    {ev.time ? <span className="muted" style={{ marginRight: 6 }}>{ev.time}</span> : null}
+                    {ev.title}
+                  </div>
+                  <div className="small muted">Своё дело{ev.note ? ' · ' + ev.note : ''}</div>
+                </div>
+                <div className="tick" onClick={(e) => { e.stopPropagation(); toggleEvent(ev.id) }}>
+                  {ev.done && <Check size={15} color="#fff" />}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {moved > 0 && (
+          <p className="small" style={{ color: 'var(--success)', marginBottom: 0 }}>
+            Перенесено занятий: {moved}. Расписание снова сходится.
+          </p>
+        )}
+      </div>
+
+      <WeekReview />
 
       <div className="grid cols-2 stagger" style={{ alignItems: 'start' }}>
         <div className="card">
           <div className="row" style={{ marginBottom: 12 }}>
-            <h3 style={{ margin: 0 }}>📌 Сегодня</h3>
-            <div className="spacer" />
-            <span className="chip">{today.length + todayEvents.length}</span>
-          </div>
-          {todayEvents.map((ev) => (
-            <div key={ev.id} className={'lesson ev-row' + (ev.done ? ' done' : '')} style={{ borderLeft: '4px dashed var(--muted-2)' }}>
-              <div className="kind-ic" style={{ background: 'var(--panel-2)', borderColor: 'transparent' }}>📌</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 650, textDecoration: ev.done ? 'line-through' : 'none' }}>
-                  {ev.time ? <span className="muted" style={{ marginRight: 6 }}>{ev.time}</span> : null}
-                  {ev.title}
-                </div>
-                <div className="small muted">Своё дело{ev.note ? ' · ' + ev.note : ''}</div>
-              </div>
-              <div className="tick" onClick={() => toggleEvent(ev.id)}>{ev.done && <Check size={15} color="#fff" />}</div>
-            </div>
-          ))}
-          {today.length === 0 ? (
-            <p className="muted small">
-              {todayEvents.length ? 'Занятий плана на сегодня нет — только свои дела.' : 'На сегодня занятий нет — отдохни или повтори пройденное.'}
-            </p>
-          ) : (
-            today.map((it) => <Row key={it.lesson.id} block={it.block} lesson={it.lesson} color={it.color} onToggle={toggleLesson} onOpen={onOpen} />)
-          )}
-
-          <div className="row" style={{ margin: '18px 0 10px' }}>
             <h3 style={{ margin: 0, fontSize: 16 }}>🌅 Завтра</h3>
             <div className="spacer" />
             <span className="chip">{tomorrow.length + tomorrowEvents.length}</span>
           </div>
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Смотреть необязательно — завтра приложение само поставит это в «Сегодня».
+          </p>
           {tomorrowEvents.map((ev) => (
             <div key={ev.id} className="lesson ev-row" style={{ borderLeft: '4px dashed var(--muted-2)' }}>
               <div className="kind-ic" style={{ background: 'var(--panel-2)', borderColor: 'transparent' }}>📌</div>
@@ -202,30 +228,16 @@ export default function Home() {
           )}
         </div>
 
-        <div className="grid" style={{ gap: 16 }}>
-          <div className="card">
-            <div className="row" style={{ marginBottom: 12 }}>
-              <RotateCcw size={17} color="var(--accent)" />
-              <h3 style={{ margin: 0, fontSize: 16 }}>Что повторить</h3>
-            </div>
-            {review.length === 0 ? (
-              <p className="muted small">Нет занятий на повторение — так держать!</p>
-            ) : (
-              review.map((x) => <Row key={x.lesson.id} block={x.block} lesson={x.lesson} color={colors[x.block.id]} onToggle={toggleLesson} onOpen={onOpen} />)
-            )}
+        <div className="card">
+          <div className="row" style={{ marginBottom: 12 }}>
+            <CheckCircle2 size={17} color="var(--success)" />
+            <h3 style={{ margin: 0, fontSize: 16 }}>Недавно сделано</h3>
           </div>
-
-          <div className="card">
-            <div className="row" style={{ marginBottom: 12 }}>
-              <CheckCircle2 size={17} color="var(--success)" />
-              <h3 style={{ margin: 0, fontSize: 16 }}>Недавно сделано</h3>
-            </div>
-            {recent.length === 0 ? (
-              <p className="muted small">Пока ничего не отмечено. Начни с заданий на сегодня 👆</p>
-            ) : (
-              recent.map((x) => <Row key={x.lesson.id} block={x.block} lesson={x.lesson} color={colors[x.block.id]} onOpen={onOpen} />)
-            )}
-          </div>
+          {recent.length === 0 ? (
+            <p className="muted small">Пока ничего не отмечено. Начни с первого пункта в «Сегодня» 👆</p>
+          ) : (
+            recent.map((x) => <Row key={x.lesson.id} block={x.block} lesson={x.lesson} color={colors[x.block.id]} onOpen={onOpen} />)
+          )}
         </div>
       </div>
 

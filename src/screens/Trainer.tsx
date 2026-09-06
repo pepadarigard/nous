@@ -24,7 +24,11 @@ const NO_ATTEMPTS: Attempt[] = []
 
 export default function Trainer() {
   const data = useStore((s) => s.data)
-  const [tab, setTab] = useState<Tab>('train')
+  // Вкладку можно открыть по ссылке: «Сегодня» на главной ведёт прямо в пробник.
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab')
+    return t === 'mock' || t === 'bank' || t === 'stats' || t === 'check' ? (t as Tab) : 'train'
+  })
   const [importOpen, setImportOpen] = useState(false)
 
   // Занятие плана открывает тренажёр уже настроенным: «Практика: задание № 7» ведёт
