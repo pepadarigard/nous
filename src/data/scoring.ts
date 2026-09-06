@@ -135,6 +135,18 @@ export function toTestScore(subjectId: string, primary: number): number {
 }
 
 /**
+ * Сколько первичных баллов нужно, чтобы выйти на заданный тестовый.
+ * Нужно для плана «дойти до порога»: он берёт ровно столько номеров, сколько
+ * требуется, а не всю часть 1 — иначе план «просто сдать» выходит длиннее полного.
+ */
+export function primaryForTest(subjectId: string, test: number): number {
+  const s = SCORING[subjectId]
+  if (!s) return 0
+  const i = s.toTest.findIndex((t) => t >= test)
+  return i < 0 ? s.maxPrimary : i
+}
+
+/**
  * Сходятся ли данные сами с собой: сумма весов равна заявленному максимуму,
  * шкала покрывает все первичные баллы и не убывает. Гоняется тестом, а не в проде.
  */

@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store'
+import { taskTheory } from '../data/theory'
 import { subjectById, subjectName } from '../data/subjects'
 import { addDaysISO, agendaByDate, dayLabel, todayISO } from '../lib/schedule'
 import Modal from '../ui/Modal'
-import { Check, Pin, PinOff, CalendarClock, Library, ExternalLink, Unlink, Sparkles, Loader2, RefreshCw, Eye, Plus, Dumbbell } from 'lucide-react'
+import { Check, Pin, PinOff, CalendarClock, Library, ExternalLink, Unlink, Sparkles, Loader2, RefreshCw, Eye, Plus, Dumbbell, BookOpen } from 'lucide-react'
 import { humanError, isTauri, loadMaterialText, openMaterialFile, uid } from '../lib/api'
 import { humanSize } from '../lib/extract'
 import { lessonBrief } from '../lib/aiTutor'
@@ -46,8 +47,17 @@ export default function LessonDetail({ blockId, lessonId, onClose }: { blockId: 
   const pct = total ? Math.round((doneN / total) * 100) : 0
   const s = subjectById(block.subjectId)
   const base = currentDate ?? todayISO()
-  // «Практика: задание № 7» → 7. Тот же разбор, что и в карточке ИИ ниже.
-  const lessonTaskNo = Number((lesson.title.match(/№\s*(\d{1,2})/) || [])[1]) || undefined
+  // Номер задания ищем и в заголовке, и в описании: у теоретических занятий заголовок
+  // называет тему («Теория: Паронимы»), а номер живёт в описании («Разбери тему задания № 5»).
+  // Диапазон («задания № 1–5» у повторения) намеренно НЕ считается номером: это несколько
+  // заданий сразу, и подставлять теорию или фильтр по первому из них было бы враньём.
+  // Номер обязан стоять после слова «задание» — иначе «Пробник № 1» выдаёт себя за
+  // первое задание и тянет за собой чужую теорию. NB: [а-яё], а не \w — кириллица
+  // в \w в JavaScript не входит.
+  const taskMatch = (lesson.title + ' ' + lesson.description).match(
+    /задани[а-яё]*\s*№\s*(\d{1,2})\s*(?:[–—-]\s*(\d{1,2}))?/i,
+  )
+  const lessonTaskNo = taskMatch && !taskMatch[2] ? Number(taskMatch[1]) : undefined
 
   // Доказательство вместо обещания: сколько заданий этого номера реально решено.
   // Галочка «выполнено» остаётся самоотчётом, а вот это — измерение.
@@ -55,6 +65,9 @@ export default function LessonDetail({ blockId, lessonId, onClose }: { blockId: 
     (a) => a.subjectId === block.subjectId && a.taskNo === lessonTaskNo && a.correct !== null,
   )
   const solvedRight = solved.filter((a) => a.correct).length
+
+  // Теория по номеру занятия: раньше «разбери тему» было отпиской, теперь есть что разбирать.
+  const theory = taskTheory(block.subjectId, lessonTaskNo)
 
   return (
     <Modal title={lesson.title} onClose={onClose} wide>
@@ -90,6 +103,40 @@ export default function LessonDetail({ blockId, lessonId, onClose }: { blockId: 
           </button>
         )}
       </div>
+
+      {theory && (
+        <div className="card soft" style={{ marginTop: 18 }}>
+          <div className="row" style={{ marginBottom: 8 }}>
+            <BookOpen size={16} color="var(--accent)" />
+            <b>Как решается задание № {lessonTaskNo}</b>
+          </div>
+          <div style={{ fontSize: 15, lineHeight: 1.6 }}>{theory.rule}</div>
+
+          {theory.learn && (
+            <div className="info-banner" style={{ marginTop: 10 }}>
+              <div className="small" style={{ flex: 1 }}>{theory.learn}</div>
+            </div>
+          )}
+
+          {theory.steps && (
+            <>
+              <div className="small" style={{ marginTop: 12, marginBottom: 4, fontWeight: 600 }}>Порядок действий</div>
+              <ol style={{ margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.65 }}>
+                {theory.steps.map((s, i) => <li key={i} style={{ marginBottom: 3 }}>{s}</li>)}
+              </ol>
+            </>
+          )}
+
+          {theory.traps && (
+            <>
+              <div className="small" style={{ marginTop: 12, marginBottom: 4, fontWeight: 600 }}>Где теряют балл</div>
+              <ul style={{ margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.65 }}>
+                {theory.traps.map((t, i) => <li key={i} style={{ marginBottom: 3 }}>{t}</li>)}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
 
       {lessonTaskNo !== undefined && (
         <div className="small muted" style={{ marginTop: 10 }}>

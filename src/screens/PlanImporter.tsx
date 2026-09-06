@@ -5,7 +5,7 @@ import { subjectById } from '../data/subjects'
 import type { Block } from '../types'
 import { Copy, ArrowRight, ExternalLink, PartyPopper, Zap, WifiOff } from 'lucide-react'
 import { humanError, openExternal } from '../lib/api'
-import { buildOfflinePlan, offlinePlanSize } from '../lib/offlinePlan'
+import { PRESETS, buildPresetPlan, presetCoverage, presetSize, suggestPreset } from '../lib/presets'
 import { hasTaskMap } from '../data/egeTasks'
 import { weakSpots } from '../lib/bank'
 import { countOf } from '../lib/plural'
@@ -58,7 +58,15 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
   }
 
   const offlineSubjects = (store.data.subjects.length ? store.data.subjects : ['russian']).filter(hasTaskMap)
-  const offlineSize = offlineSubjects.length ? offlinePlanSize(offlineSubjects) : 0
+
+  // Сколько недель осталось — от этого зависит и что предложить, и влезет ли план.
+  const weeksLeft = store.data.examDate
+    ? Math.max(0, Math.ceil((new Date(store.data.examDate).getTime() - Date.now()) / (7 * 86400000)))
+    : undefined
+  const [preset, setPreset] = useState(() => suggestPreset(weeksLeft))
+  const presetOpts = { subjects: offlineSubjects, examDate: store.data.examDate, weeksLeft }
+  const offlineSize = offlineSubjects.length ? presetSize(preset, presetOpts) : 0
+  const coverage = offlineSubjects.length ? presetCoverage(preset, presetOpts) : { covered: 0, max: 0 }
 
   const prompt = buildPlanPrompt({
     subjects: store.data.subjects,
@@ -107,7 +115,12 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
       if (!weakTaskNos[w.subjectId]) weakTaskNos[w.subjectId] = []
       weakTaskNos[w.subjectId].push(w.taskNo)
     }
-    const plan = buildOfflinePlan({ subjects, examDate: store.data.examDate, weakTaskNos })
+    const plan = buildPresetPlan(preset, {
+      subjects,
+      examDate: store.data.examDate,
+      weeksLeft,
+      weakTaskNos,
+    })
     store.ensureSubjectSetup(subjects)
     store.setPlan(plan)
     setSummary(buildSummary(plan.blocks))
@@ -207,9 +220,9 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
           <b>Без ИИ и без интернета</b>
         </div>
         <p className="small muted" style={{ marginTop: 0 }}>
-          Соберу план прямо здесь — по структуре экзамена: каждое задание КИМ закрывается теорией,
-          практикой и повторением. Если в тренажёре уже копится статистика, по слабым номерам добавлю
-          лишний подход. План потом можно править руками или отдать ИИ на доработку.
+          Соберу план прямо здесь, по структуре экзамена. Выбери стратегию — они отличаются не
+          оформлением, а тем, на что тратится время: номера берутся с учётом их веса в первичных
+          баллах. Если в тренажёре уже копится статистика, по слабым номерам добавлю подход.
         </p>
         {offlineSubjects.length === 0 ? (
           <p className="small" style={{ color: 'var(--warn)', margin: 0 }}>
@@ -217,12 +230,48 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
             для твоих предметов собери план через ИИ или вставь свой.
           </p>
         ) : (
-          <div className="row wrap" style={{ gap: 10 }}>
-            <button className="btn btn-primary" onClick={buildOffline}>Собрать план по структуре ЕГЭ</button>
-            <span className="small muted">
-              {offlineSubjects.map((id) => subjectById(id)?.short ?? id).join(', ')} · примерно {countOf(offlineSize, ['занятие', 'занятия', 'занятий'])}
-            </span>
-          </div>
+          <>
+            <div className="grid" style={{ gap: 8, marginBottom: 12 }}>
+              {PRESETS.map((p) => {
+                const fits =
+                  weeksLeft === undefined ||
+                  ((p.minWeeks === undefined || weeksLeft >= p.minWeeks) &&
+                    (p.maxWeeks === undefined || weeksLeft <= p.maxWeeks))
+                return (
+                  <button
+                    key={p.id}
+                    className={'pick-card' + (preset === p.id ? ' on' : '')}
+                    style={preset === p.id ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)' } : undefined}
+                    onClick={() => setPreset(p.id)}
+                  >
+                    <div style={{ textAlign: 'left' }}>
+                      <div className="row wrap" style={{ gap: 8 }}>
+                        <b>{p.name}</b>
+                        {!fits && (
+                          <span className="badge" title="По сроку до экзамена этот план подходит хуже">
+                            не по сроку
+                          </span>
+                        )}
+                      </div>
+                      <div className="small muted">{p.who}</div>
+                      {preset === p.id && (
+                        <div className="small" style={{ marginTop: 6 }}>{p.detail}</div>
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="row wrap" style={{ gap: 10 }}>
+              <button className="btn btn-primary" onClick={buildOffline}>Собрать этот план</button>
+              <span className="small muted">
+                {offlineSubjects.map((id) => subjectById(id)?.short ?? id).join(', ')} ·{' '}
+                {countOf(offlineSize, ['занятие', 'занятия', 'занятий'])} · закрывает{' '}
+                <b>{coverage.covered}</b> из {coverage.max} первичных баллов
+                {weeksLeft !== undefined && <> · до экзамена {countOf(weeksLeft, ['неделя', 'недели', 'недель'])}</>}
+              </span>
+            </div>
+          </>
         )}
       </div>
 
