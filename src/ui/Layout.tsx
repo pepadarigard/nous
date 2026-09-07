@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, CalendarDays, Library, Target, TrendingUp, MessageCircle, Settings as Cog, Trophy } from 'lucide-react'
+import { LayoutDashboard, CalendarDays, Library, Target, TrendingUp, MessageCircle, Settings as Cog, Trophy, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store'
 import { computeStats } from '../lib/stats'
 
@@ -15,6 +15,7 @@ const nav = [
 
 export default function Layout() {
   const data = useStore((s) => s.data)
+  const saveError = useStore((s) => s.saveError)
   const st = computeStats(data)
 
   return (
@@ -39,10 +40,21 @@ export default function Layout() {
           <div className="sl-bar"><span style={{ width: `${st.level.pct}%` }} /></div>
         </NavLink>
         <div className="sidebar-foot">
-          Учись в удовольствие. План — от твоего ИИ, всё остальное — тут.
+          Учись в удовольствие. План, задания и повторение работают без интернета.
         </div>
       </aside>
       <main className="main">
+        {/* Сбой записи нельзя оставлять в консоли: без этой полосы ученик узнал бы
+            о потере работы только при следующем запуске. */}
+        {saveError && (
+          <div className="save-warn">
+            <AlertTriangle size={16} />
+            <div>
+              <b>Не удаётся сохранить</b> — сделанное сейчас может пропасть при перезапуске.
+              <div className="small">{saveError}</div>
+            </div>
+          </div>
+        )}
         <Outlet />
       </main>
     </div>

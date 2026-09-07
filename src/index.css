@@ -2285,3 +2285,18 @@ label.field > span {
   align-items: flex-start;
   flex-wrap: wrap;
 }
+
+/* Полоса «не удаётся сохранить»: висит над содержимым страницы, пока запись не пройдёт. */
+.save-warn {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+  line-height: 1.4;
+}
+.save-warn .small { opacity: 0.85; margin-top: 2px; }

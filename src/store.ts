@@ -20,6 +20,8 @@ interface Store {
   loaded: boolean
   data: AppData
   planStatus: string
+  /** Последняя ошибка сохранения. Пустая строка — всё записалось. */
+  saveError: string
   celebrations: Celebration[]
   chatMsgs: ChatMsg[] // живёт в памяти сессии — чат не теряется при переходах между экранами
   chatBusy: boolean // запрос к ИИ в полёте; в сторе — чтобы доживал при уходе со вкладки
@@ -71,10 +73,29 @@ interface Store {
 }
 
 export const useStore = create<Store>((set, get) => {
+  /**
+   * Записать состояние на диск и НЕ проглотить ошибку.
+   *
+   * Раньше сбой уходил в console.error: в браузере кончалось место под
+   * localStorage, ученик продолжал заниматься как ни в чём не бывало, а при
+   * следующем запуске всё сделанное после сбоя исчезало. Молча терять работу
+   * нельзя — про это надо сказать сразу.
+   */
+  const persist = (next: AppData) => {
+    saveState(next)
+      .then(() => {
+        if (get().saveError) set({ saveError: '' })
+      })
+      .catch((e) => {
+        console.error('saveState', e)
+        set({ saveError: humanError(e) })
+      })
+  }
+
   const commit = (mut: (d: AppData) => AppData) => {
     const next = mut(structuredClone(get().data))
     set({ data: next })
-    saveState(next).catch((e) => console.error('saveState', e))
+    persist(next)
   }
   const pushProgress = (d: AppData, e: Omit<ProgressEvent, 'id' | 'at'>) => {
     d.progress.push({ id: uid('pr_'), at: new Date().toISOString(), ...e })
@@ -107,6 +128,7 @@ export const useStore = create<Store>((set, get) => {
     loaded: false,
     data: emptyData(),
     planStatus: '',
+    saveError: '',
     celebrations: [],
     chatMsgs: [],
     chatBusy: false,
@@ -345,7 +367,7 @@ export const useStore = create<Store>((set, get) => {
       }
 
       set({ data: next, celebrations: celebs.length ? [...get().celebrations, ...celebs] : get().celebrations })
-      saveState(next).catch((e) => console.error('saveState', e))
+      persist(next)
     },
     dismissCelebration: (id) => set({ celebrations: get().celebrations.filter((c) => c.id !== id) }),
     setChatMsgs: (msgs) => set({ chatMsgs: msgs }),
