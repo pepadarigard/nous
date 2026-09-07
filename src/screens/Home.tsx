@@ -57,7 +57,7 @@ export default function Home() {
     return (
       <div className="empty fade-in">
         <div className="big">🗓️</div>
-        <p>Плана пока нет. Загляни в раздел «План», чтобы получить его от ИИ.</p>
+        <p>Плана пока нет. Загляни в раздел «План» — соберётся за секунду, по структуре экзамена.</p>
         <button className="btn btn-primary" onClick={() => nav('/plan')}>К плану <ArrowRight size={16} /></button>
       </div>
     )

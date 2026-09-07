@@ -77,7 +77,7 @@ export default function PlanScreen() {
       <div className="fade-in">
         <div className="page-head">
           <h1>План подготовки</h1>
-          <p>Плана пока нет. Получи его от ИИ или вставь свой — это займёт минуту.</p>
+          <p>Плана пока нет. Выбери стратегию — соберу по структуре экзамена за секунду.</p>
         </div>
         <div className="card" style={{ maxWidth: 760 }}>
           <PlanImporter onDone={() => setImportOpen(false)} />
