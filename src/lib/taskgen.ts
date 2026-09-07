@@ -15,7 +15,7 @@
 
 import type { Question } from '../types'
 import { PARONYMS, PLEONASM, FORMS } from '../data/norms'
-import { ROOT_WORDS, PREFIX_WORDS, ENDING_WORDS, type GapWord, type RootKind } from '../data/spelling'
+import { ROOT_WORDS, PREFIX_WORDS, SUFFIX_WORDS, ENDING_WORDS, type GapWord } from '../data/spelling'
 import { uid } from './api'
 
 export interface GeneratedTask {
@@ -198,7 +198,7 @@ const MATH: Record<number, TaskSpec> = {
       },
     ],
   },
-  6: {
+  7: {
     topic: 'Уравнения',
     families: [
       (r) => {
@@ -227,7 +227,7 @@ const MATH: Record<number, TaskSpec> = {
       },
     ],
   },
-  7: {
+  8: {
     topic: 'Вычисления',
     families: [
       (r) => {
@@ -248,7 +248,50 @@ const MATH: Record<number, TaskSpec> = {
       },
     ],
   },
-  8: {
+  6: {
+    topic: 'Случайная величина',
+    families: [
+      (r) => {
+        // Ожидание считаем в сотых долях целыми числами: 0.1·2 + 0.3·5 в двоичной
+        // арифметике даёт хвост, а ученик такой ответ не наберёт.
+        const n = int(r, 3, 4)
+        const vals: number[] = []
+        while (vals.length < n) {
+          const v = int(r, 0, 12)
+          if (!vals.includes(v)) vals.push(v)
+        }
+        vals.sort((a, b) => a - b)
+        // Вероятности в сотых, в сумме ровно 100.
+        const parts: number[] = []
+        let left = 100
+        for (let i = 0; i < n - 1; i++) {
+          const p = int(r, 5, Math.max(5, left - 5 * (n - 1 - i)))
+          parts.push(p)
+          left -= p
+        }
+        parts.push(left)
+        if (parts.some((p) => p < 5)) return null
+        const exp100 = vals.reduce((s, v, i) => s + v * parts[i], 0)
+        const table = vals.map((v, i) => `${v} — ${dec(parts[i] / 100)}`).join(';  ')
+        const terms = vals.map((v, i) => `${v}·${dec(parts[i] / 100)}`).join(' + ')
+        return {
+          text: `Случайная величина X задана законом распределения (значение — вероятность):\n\n${table}\n\nНайдите математическое ожидание X.`,
+          answer: dec(exp100 / 100),
+          solution: `Математическое ожидание: M(X) = Σ xᵢ·pᵢ.\nM(X) = ${terms} = ${dec(exp100 / 100)}.\nПроверка: сумма вероятностей ${dec(parts.reduce((a, b) => a + b, 0) / 100)}.`,
+        }
+      },
+      (r) => {
+        const n = int(r, 2, 6)
+        const p = pick(r, [10, 20, 25, 40, 50, 60, 75, 80] as const)
+        return {
+          text: `Проводится ${n} независимых испытаний, в каждом событие A происходит с вероятностью ${dec(p / 100)}. Найдите математическое ожидание числа появлений события A.`,
+          answer: dec((n * p) / 100),
+          solution: `Для схемы Бернулли M(X) = n·p.\nM(X) = ${n} · ${dec(p / 100)} = ${dec((n * p) / 100)}.`,
+        }
+      },
+    ],
+  },
+  9: {
     topic: 'Производная',
     families: [
       (r) => {
@@ -259,9 +302,54 @@ const MATH: Record<number, TaskSpec> = {
           solution: `Скорость — производная координаты по времени.\nv(t) = (${a}t² + ${b}t)′ = ${2 * a}t + ${b}.\nv(${t}) = ${2 * a} · ${t} + ${b} = ${2 * a * t + b} м/с.`,
         }
       },
+      (r) => {
+        const half = int(r, 1, 9), c = int(r, 1, 40)
+        const b = 2 * half
+        return {
+          text: `Найдите наименьшее значение функции y = x² + ${b}x + ${c}.`,
+          answer: String(c - half * half),
+          solution: `Парабола ветвями вверх — наименьшее значение в вершине.\nx = −b/(2a) = −${b}/2 = −${half}.\ny(−${half}) = ${half * half} − ${b * half} + ${c} = ${c - half * half}.`,
+        }
+      },
     ],
   },
-  10: {
+  13: {
+    topic: 'Экономическая задача',
+    families: [
+      (r) => {
+        // Вклад под сложный процент: сумма растёт в (1 + p/100) раз каждый год.
+        const s = pick(r, [40000, 50000, 60000, 80000, 100000, 120000, 150000, 200000] as const)
+        const p = pick(r, [5, 10, 20, 25, 50] as const)
+        const years = int(r, 2, 3)
+        const total = s * (1 + p / 100) ** years
+        if (!Number.isInteger(total)) return null
+        return {
+          text: `В банк положили ${s} рублей под ${p} % годовых. Проценты начисляются в конце каждого года на всю сумму вклада. Какая сумма будет на счёте через ${years} года? Ответ дайте в рублях.`,
+          answer: String(total),
+          solution: `Каждый год сумма умножается на 1 + ${p}/100 = ${dec(1 + p / 100)}.\nЗа ${years} года: ${s} · ${dec(1 + p / 100)}^${years} = ${total} руб.`,
+        }
+      },
+      (r) => {
+        // Кредит, погашаемый равными платежами. Долг растёт на p %, потом платёж x.
+        // Чтобы ответ был целым, подбираем сумму кратной знаменателю.
+        const p = pick(r, [10, 20, 25, 50] as const)
+        const k = 1 + p / 100
+        const years = int(r, 2, 3)
+        // Сумма платежей = S · k^n · (k − 1) / (k^n − 1) · n
+        const denom = k ** years - 1
+        const base = pick(r, [100000, 120000, 150000, 200000, 240000, 300000] as const)
+        const payment = (base * k ** years * (k - 1)) / denom
+        const total = payment * years
+        if (!Number.isInteger(payment) || !Number.isInteger(total)) return null
+        return {
+          text: `В банке взяли кредит ${base} рублей. Условия таковы: в конце каждого года долг увеличивается на ${p} %, после чего вносится платёж. Кредит гасится ${years} равными платежами. Найдите размер одного платежа. Ответ дайте в рублях.`,
+          answer: String(payment),
+          solution: `Пусть платёж x. После ${years} лет долг обнуляется:\n${base}·${dec(k)}^${years} = x·(${dec(k)}^${years - 1} + … + 1).\nОтсюда x = ${base}·${dec(k)}^${years}·(${dec(k)} − 1) / (${dec(k)}^${years} − 1) = ${payment} руб.\nОбщая выплата: ${payment} · ${years} = ${total} руб.`,
+        }
+      },
+    ],
+  },
+  11: {
     topic: 'Текстовые задачи',
     families: [
       (r) => {
@@ -278,20 +366,6 @@ const MATH: Record<number, TaskSpec> = {
           text: `Из двух посёлков навстречу друг другу одновременно вышли два пешехода со скоростями ${v1} и ${v2} км/ч. Через ${t} ч они встретились. Найдите расстояние между посёлками в километрах.`,
           answer: String((v1 + v2) * t),
           solution: `При движении навстречу скорости складываются: ${v1} + ${v2} = ${v1 + v2} км/ч.\ns = ${v1 + v2} · ${t} = ${(v1 + v2) * t} км.`,
-        }
-      },
-    ],
-  },
-  12: {
-    topic: 'Наибольшее и наименьшее',
-    families: [
-      (r) => {
-        const half = int(r, 1, 9), c = int(r, 1, 40)
-        const b = 2 * half
-        return {
-          text: `Найдите наименьшее значение функции y = x² + ${b}x + ${c}.`,
-          answer: String(c - half * half),
-          solution: `Парабола ветвями вверх — наименьшее значение в вершине.\nx = −b/(2a) = −${b}/2 = −${half}.\ny(−${half}) = ${half * half} − ${b * half} + ${c} = ${c - half * half}.`,
         }
       },
     ],
@@ -933,25 +1007,39 @@ const STRESS: readonly (readonly [string, string])[] = [
 
 
 /**
- * Задания 10 и 12: пять рядов слов с пропусками, надо назвать ряды, где во всех
- * словах пропущена ОДНА И ТА ЖЕ буква. Ответ — номера рядов подряд, как в бланке.
+ * Задания 9–12: пять рядов слов с пропусками; назвать ряды, где пропущена
+ * ОДНА И ТА ЖЕ буква. Ответ — номера рядов подряд, как в бланке.
  *
- * Ряд-ответ собирается из слов с одинаковой буквой, ряд-обманка — из слов с
- * разными. Поэтому ответ верен по построению: он вычисляется из тех же данных,
- * из которых собран сам вопрос.
+ * Форма сверена с демоверсией ЕГЭ-2027: у корней и приставок в ряду по три
+ * слова («во всех словах одного ряда»), у суффиксов и окончаний — по два
+ * («в обоих словах одного ряда»).
+ *
+ * Ряд-ответ набирается из слов с одинаковой буквой, ряд-обманка — из слов с
+ * разными. Значит, ответ верен по построению: он вычисляется из тех же
+ * данных, из которых собран сам вопрос.
+ *
+ * `explain` — как объяснить конкретное слово в разборе (для корней это тип
+ * гласной и проверочное слово, для остальных достаточно самой буквы).
  */
-function sameLetterRows(r: Rnd, words: readonly GapWord[], where: string) {
+function sameLetterRows(
+  r: Rnd,
+  words: readonly GapWord[],
+  perRow: 2 | 3,
+  explain?: (word: string) => string,
+) {
   const byLetter = new Map<string, GapWord[]>()
   for (const w of words) {
     const list = byLetter.get(w[1])
     if (list) list.push(w)
     else byLetter.set(w[1], [w])
   }
-  const letters = [...byLetter.keys()].filter((l) => (byLetter.get(l)?.length ?? 0) >= 2)
+  const letters = [...byLetter.keys()].filter((l) => (byLetter.get(l)?.length ?? 0) >= perRow)
   if (letters.length < 2) return null
 
   const ROWS = 5
-  const rightCount = int(r, 2, 3)
+  // Сколько рядов верных. Ни ноль, ни все пять: и то и другое ученик угадает,
+  // не читая слов, а в настоящих вариантах такого не бывает.
+  const rightCount = int(r, 1, 3)
   const isRight = shuffle(r, [...Array(ROWS)].map((_, i) => i < rightCount))
   const used = new Set<string>()
   const take = (pool: GapWord[]): GapWord | null => {
@@ -964,86 +1052,48 @@ function sameLetterRows(r: Rnd, words: readonly GapWord[], where: string) {
 
   const rows: { words: GapWord[]; right: boolean }[] = []
   for (const right of isRight) {
+    const row: GapWord[] = []
     if (right) {
       const l = pick(r, letters)
-      const a = take(byLetter.get(l)!)
-      const b = take(byLetter.get(l)!)
-      if (!a || !b) return null
-      rows.push({ words: [a, b], right: true })
+      for (let i = 0; i < perRow; i++) {
+        const w = take(byLetter.get(l)!)
+        if (!w) return null
+        row.push(w)
+      }
     } else {
-      const shuffled = shuffle(r, letters)
-      const a = take(byLetter.get(shuffled[0])!)
-      const b = take(byLetter.get(shuffled[1])!)
-      if (!a || !b) return null
-      rows.push({ words: [a, b], right: false })
+      // В обманке ровно одно слово выбивается: искать его — и есть работа.
+      const mixed = shuffle(r, letters)
+      const odd = int(r, 0, perRow - 1)
+      for (let i = 0; i < perRow; i++) {
+        const w = take(byLetter.get(i === odd ? mixed[1] : mixed[0])!)
+        if (!w) return null
+        row.push(w)
+      }
     }
+    rows.push({ words: row, right })
   }
 
   const answer = rows.map((row, i) => (row.right ? i + 1 : 0)).filter(Boolean).join('')
   const body = rows.map((row, i) => `${i + 1}) ${row.words.map((w) => w[0]).join(', ')}`).join('\n')
   const why = rows
     .map((row, i) => {
-      const spelled = row.words.map((w) => w[0].replace('..', w[1].toUpperCase())).join(', ')
-      return `${i + 1}) ${spelled} — ${row.right ? 'буква одна и та же' : 'буквы разные'}`
+      const parts = row.words
+        .map((w) => w[0].replace('..', w[1].toUpperCase()) + (explain ? ` (${explain(w[0])})` : ''))
+        .join('; ')
+      return `${i + 1}) ${parts} — ${row.right ? 'буква одна и та же' : 'буквы разные'}`
     })
     .join('\n')
+  const scope = perRow === 3 ? 'во всех словах одного ряда' : 'в обоих словах одного ряда'
   return {
-    text: `Укажите варианты ответов, в которых во всех словах одного ряда пропущена одна и та же буква (в ${where}). Запишите номера ответов подряд, без пробелов.\n\n${body}`,
+    text: `Укажите варианты ответов, в которых ${scope} пропущена одна и та же буква. Запишите номера ответов подряд, без пробелов.\n\n${body}`,
     answer,
     solution: `${why}\n\nОтвет: ${answer}.`,
   }
 }
 
-/**
- * Задание 9: пять рядов по три слова, надо назвать ряды, где во ВСЕХ словах
- * гласная в корне относится к одному типу — проверяемая, непроверяемая или
- * чередующаяся. Тип каждого слова задан в данных, отсюда и ответ.
- */
-function rowsByRoot(r: Rnd, kind: RootKind) {
-  const same = ROOT_WORDS.filter((w) => w[1] === kind)
-  const other = ROOT_WORDS.filter((w) => w[1] !== kind)
-  if (same.length < 12 || other.length < 5) return null
-
-  const ROWS = 5
-  const PER_ROW = 3
-  const rightCount = int(r, 1, 2)
-  const isRight = shuffle(r, [...Array(ROWS)].map((_, i) => i < rightCount))
-  const used = new Set<string>()
-  const take = (pool: readonly (readonly [string, RootKind, string])[]) => {
-    const free = pool.filter((w) => !used.has(w[0]))
-    if (!free.length) return null
-    const w = pick(r, free)
-    used.add(w[0])
-    return w
-  }
-
-  const rows: { words: (readonly [string, RootKind, string])[]; right: boolean }[] = []
-  for (const right of isRight) {
-    const words: (readonly [string, RootKind, string])[] = []
-    // В ряду-обманке ровно одно слово «не то»: искать его — и есть работа ученика.
-    const wrongAt = right ? -1 : int(r, 0, PER_ROW - 1)
-    for (let i = 0; i < PER_ROW; i++) {
-      const w = take(i === wrongAt ? other : same)
-      if (!w) return null
-      words.push(w)
-    }
-    rows.push({ words, right })
-  }
-
-  const answer = rows.map((row, i) => (row.right ? i + 1 : 0)).filter(Boolean).join('')
-  const body = rows.map((row, i) => `${i + 1}) ${row.words.map((w) => w[0]).join(', ')}`).join('\n')
-  const why = rows
-    .map((row, i) => {
-      const parts = row.words.map((w) => `${w[0]} — ${w[1]} (${w[2]})`).join('; ')
-      return `${i + 1}) ${parts}`
-    })
-    .join('\n')
-  return {
-    text: `Укажите варианты ответов, в которых во всех словах одного ряда пропущена безударная ${kind} гласная корня. Запишите номера ответов подряд, без пробелов.\n\n${body}`,
-    answer,
-    solution: `${why}\n\nПодходят ряды, где ВСЕ три слова нужного типа.\nОтвет: ${answer}.`,
-  }
-}
+/** Как объяснить корневую гласную: тип и проверочное слово. */
+const ROOT_HINT = new Map(ROOT_WORDS.map((w) => [w[0], `${w[2]}, ${w[3]}`]))
+const ROOT_GAPS: readonly GapWord[] = ROOT_WORDS.map((w) => [w[0], w[1]] as const)
 
 /** Убрать случайные не-кириллические вставки из данных. */
 const ru = (s: string) => s.replace(/[^Ѐ-ӿ\s.,:;!?()«»—–-]/g, '').replace(/\s{2,}/g, ' ').trim()
@@ -1096,19 +1146,19 @@ const RUSSIAN: Record<number, TaskSpec> = {
   },
   9: {
     topic: 'Правописание корней',
-    families: [
-      (r) => rowsByRoot(r, 'проверяемая'),
-      (r) => rowsByRoot(r, 'чередующаяся'),
-      (r) => rowsByRoot(r, 'непроверяемая'),
-    ],
+    families: [(r) => sameLetterRows(r, ROOT_GAPS, 3, (w) => ROOT_HINT.get(w) ?? '')],
   },
   10: {
     topic: 'Правописание приставок',
-    families: [(r) => sameLetterRows(r, PREFIX_WORDS, 'приставке')],
+    families: [(r) => sameLetterRows(r, PREFIX_WORDS, 3)],
+  },
+  11: {
+    topic: 'Суффиксы разных частей речи',
+    families: [(r) => sameLetterRows(r, SUFFIX_WORDS, 2)],
   },
   12: {
     topic: 'Личные окончания глаголов и суффиксы причастий',
-    families: [(r) => sameLetterRows(r, ENDING_WORDS, 'окончании или суффиксе')],
+    families: [(r) => sameLetterRows(r, ENDING_WORDS, 2)],
   },
   7: {
     topic: 'Морфологические нормы',
