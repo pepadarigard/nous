@@ -3,14 +3,14 @@ import { useStore } from '../store'
 import { checkApiKey, humanError, isTauri, openExternal, saveState } from '../lib/api'
 import { chatModels, modelLabel, modelScore, pickBestModel } from '../lib/models'
 import { PROVIDERS, PROVIDER_ORDER, activeKey, isLocal, keyOf, keyPatch, normProvider } from '../lib/providers'
-import { appVersion, checkUpdate, GITHUB_URL, type UpdateInfo } from '../lib/update'
+import { appVersion, checkUpdate, downloadUpdate, installUpdate, GITHUB_URL, type UpdateInfo } from '../lib/update'
 import { subjectName } from '../data/subjects'
 import type { AppData, Provider } from '../types'
 import Modal from '../ui/Modal'
 import PlanImporter from './PlanImporter'
 import PlanExtender from './PlanExtender'
 import ScheduleSetup from './ScheduleSetup'
-import { CalendarRange, KeyRound, RefreshCw, AlertTriangle, Wand2, Download, Upload, ExternalLink, FolderOpen } from 'lucide-react'
+import { CalendarRange, KeyRound, RefreshCw, AlertTriangle, Wand2, Download, Upload, ExternalLink, FolderOpen, Loader2 } from 'lucide-react'
 
 const selProv = { borderColor: 'var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-text)', fontWeight: 700 }
 
@@ -188,6 +188,29 @@ export default function Settings() {
     if (!importData) return
     await saveState(importData)
     window.location.reload()
+  }
+
+  const [updStep, setUpdStep] = useState('')
+
+  /**
+   * Поставить обновление отсюда же. Перед подменой файлов сохраняем данные:
+   * установщик их не трогает (они в папке данных), но если он оборвётся на
+   * середине, копия уже будет свежей.
+   */
+  async function doInstallUpdate() {
+    const asset = updMsg?.info?.asset
+    if (!asset || updStep) return
+    try {
+      setUpdStep('Сохраняю данные…')
+      await saveState(data, true)
+      setUpdStep('Скачиваю…')
+      const path = await downloadUpdate(asset)
+      setUpdStep('Запускаю установщик…')
+      await installUpdate(path)
+    } catch (e) {
+      setUpdMsg({ error: humanError(e) })
+      setUpdStep('')
+    }
   }
 
   async function doCheckUpdate() {
@@ -400,7 +423,15 @@ export default function Settings() {
             {updMsg.info.newer ? (
               <>
                 <span className="small" style={{ color: 'var(--accent-text)' }}>🎉 Доступна новая версия {updMsg.info.latest} (у тебя v{updMsg.info.current})</span>
-                <button className="btn btn-primary btn-sm" onClick={() => openExternal(updMsg.info!.url)}>Скачать</button>
+                {/* Ставим на месте, а не отправляем человека качать руками.
+                    Ссылка остаётся запасным путём, если в релизе нет .exe. */}
+                {updMsg.info.asset ? (
+                  <button className="btn btn-primary btn-sm" disabled={!!updStep} onClick={doInstallUpdate}>
+                    {updStep ? <><Loader2 size={14} className="spin-ic" /> {updStep}</> : <><Download size={14} /> Обновить</>}
+                  </button>
+                ) : (
+                  <button className="btn btn-primary btn-sm" onClick={() => openExternal(updMsg.info!.url)}>Открыть релиз</button>
+                )}
               </>
             ) : (
               <span className="small" style={{ color: 'var(--success)' }}>✓ У тебя последняя версия ({updMsg.info.current})</span>

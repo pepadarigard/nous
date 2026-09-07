@@ -2399,3 +2399,22 @@ label.field > span {
 .crit-box { border-left-color: var(--warn, #d09a2c); }
 .crit-box > summary { cursor: pointer; list-style: revert; }
 .crit-box[open] > summary { margin-bottom: 8px; }
+
+/* Предложение обновиться. Заметно, но не перекрывает работу: строка сверху,
+   которую можно отложить одним нажатием. */
+.upd-banner {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  line-height: 1.4;
+}
+.upd-banner .small { opacity: 0.9; }
+@media (max-width: 640px) {
+  .upd-banner { flex-wrap: wrap; }
+}

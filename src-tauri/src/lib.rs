@@ -193,6 +193,60 @@ async fn llm_stream(
     Ok(full)
 }
 
+/// Откуда можно качать обновление. Команда запускает СКАЧАННЫЙ ФАЙЛ, поэтому
+/// адрес обязан быть из релизов GitHub и ниоткуда больше.
+fn allowed_release(url: &str) -> bool {
+    url.starts_with("https://github.com/") && url.contains("/releases/download/")
+        || url.starts_with("https://objects.githubusercontent.com/")
+        || url.starts_with("https://release-assets.githubusercontent.com/")
+}
+
+/// Скачать установщик обновления во временную папку. Возвращает путь к файлу.
+#[tauri::command]
+async fn download_update(app: tauri::AppHandle, url: String, name: String) -> Result<String, String> {
+    if !allowed_release(&url) {
+        return Err("Недопустимый адрес обновления".into());
+    }
+    // Имя формируем сами: то, что пришло из сети, в путь не подставляем.
+    let file = safe_file_name(&name);
+    if !file.ends_with(".exe") {
+        return Err("Обновление должно быть .exe".into());
+    }
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("update");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(&file);
+
+    let resp = http().get(&url).header("User-Agent", "nous-app").send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("GitHub ответил {}", resp.status().as_u16()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    // Установщик Nous весит около пяти мегабайт; сто — это точно не он.
+    if bytes.len() < 500_000 || bytes.len() > 100 * 1024 * 1024 {
+        return Err(format!("Файл странного размера: {} байт", bytes.len()));
+    }
+    fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Запустить скачанный установщик и закрыть приложение.
+///
+/// Закрыться обязательно: NSIS не сможет переписать exe, пока он запущен.
+/// Данные при этом не трогаются — они лежат в app_data, а установщик работает
+/// только со своей папкой.
+#[tauri::command]
+fn run_installer(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("update");
+    // Запускаем только то, что сами же и скачали.
+    if !p.starts_with(&cache) || !p.exists() {
+        return Err("Файл обновления не найден".into());
+    }
+    std::process::Command::new(&p).spawn().map_err(|e| e.to_string())?;
+    app.exit(0);
+    Ok(())
+}
+
 /// Файл банка заданий — отдельно от состояния.
 ///
 /// Полная загрузка с Решу ЕГЭ — это тысячи заданий и мегабайты. Держать их в
@@ -441,6 +495,8 @@ pub fn run() {
             bank_get,
             bank_image,
             github_latest,
+            download_update,
+            run_installer,
             export_state,
             reveal_path,
             save_material,

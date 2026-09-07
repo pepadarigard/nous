@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { LayoutDashboard, CalendarDays, Library, Target, TrendingUp, MessageCircle, Settings as Cog, Trophy, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store'
 import { computeStats } from '../lib/stats'
+import UpdateBanner from './UpdateBanner'
 
 const nav = [
   { to: '/', label: 'Главная', icon: LayoutDashboard, end: true },
@@ -55,6 +56,7 @@ export default function Layout() {
             </div>
           </div>
         )}
+        <UpdateBanner />
         <Outlet />
       </main>
     </div>

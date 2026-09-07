@@ -5,7 +5,9 @@ import { isTauri } from './api'
 // Публичный репозиторий проекта (owner/repo). Используется для проверки обновлений.
 export const GITHUB_REPO = 'pepadarigard/nous'
 export const GITHUB_URL = `https://github.com/${GITHUB_REPO}`
-const FALLBACK_VERSION = '0.3.0'
+// В приложении версию отдаёт сам Tauri; в браузере берём ту, что вшита сборкой.
+declare const __APP_VERSION__: string
+const FALLBACK_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0'
 
 export async function appVersion(): Promise<string> {
   if (isTauri) {
@@ -35,6 +37,10 @@ export interface UpdateInfo {
   latest: string
   newer: boolean
   url: string
+  /** Что за файл ставить. null — в релизе нет установщика, обновляться руками. */
+  asset: ReleaseAsset | null
+  /** Описание релиза — что нового. */
+  notes?: string
 }
 
 export async function checkUpdate(): Promise<UpdateInfo> {
@@ -65,5 +71,49 @@ export async function checkUpdate(): Promise<UpdateInfo> {
     latest,
     newer: cmpVer(latest, current) > 0,
     url: String(json.html_url || `${GITHUB_URL}/releases/latest`),
+    asset: pickInstaller(json),
+    notes: typeof json.body === 'string' ? json.body.trim() : undefined,
   }
+}
+
+/**
+ * Установщик из релиза.
+ *
+ * Ищем именно .exe: в релизе рядом лежит и портативный zip, а его запуск ничего
+ * не обновит. Если подходящего файла нет — обновиться на месте не выйдет,
+ * и честнее отправить человека на страницу релиза руками.
+ */
+export interface ReleaseAsset {
+  name: string
+  url: string
+  size: number
+}
+
+function pickInstaller(json: any): ReleaseAsset | null {
+  const assets: any[] = Array.isArray(json?.assets) ? json.assets : []
+  const exe = assets.find((a) => String(a?.name ?? '').toLowerCase().endsWith('.exe'))
+  if (!exe?.browser_download_url) return null
+  return { name: String(exe.name), url: String(exe.browser_download_url), size: Number(exe.size) || 0 }
+}
+
+/** Скачать установщик обновления. Возвращает путь к файлу на диске. */
+export async function downloadUpdate(asset: ReleaseAsset): Promise<string> {
+  if (!isTauri) throw new Error('Обновление ставится только в приложении.')
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke<string>('download_update', { url: asset.url, name: asset.name })
+}
+
+/**
+ * Запустить установщик. Приложение при этом закрывается — иначе Windows не даст
+ * переписать его файлы.
+ *
+ * Данные не теряются: план, прогресс и банк лежат в папке данных
+ * (%APPDATA%\com.egeplan.desktop), а установщик работает только со своей.
+ * Перед запуском всё равно делаем свежую копию состояния — на случай, если
+ * обновление прервётся на середине.
+ */
+export async function installUpdate(path: string): Promise<void> {
+  if (!isTauri) throw new Error('Обновление ставится только в приложении.')
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('run_installer', { path })
 }
