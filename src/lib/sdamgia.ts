@@ -78,6 +78,36 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // ---------- разбор текста ----------
 
+/**
+ * Текст элемента С СОХРАНЕНИЕМ структуры.
+ *
+ * `textContent` склеивает всё подряд, и задание превращалось в кирпич:
+ * «…является число 6321.а) Приведите пример двух…». А в этих заданиях структура
+ * и есть половина условия — пункты а), б), в) и ряды 1)…5) должны стоять
+ * каждый со своей строки, иначе читать невозможно.
+ *
+ * Поэтому обходим дерево сами и на границах блоков ставим перенос.
+ */
+function blockText(root: Node): string {
+  const BLOCK = new Set(['P', 'DIV', 'LI', 'TR', 'BR', 'H1', 'H2', 'H3', 'H4', 'H5', 'TABLE', 'UL', 'OL'])
+  let out = ''
+  const walk = (n: Node) => {
+    if (n.nodeType === 3) {
+      out += n.nodeValue ?? ''
+      return
+    }
+    if (n.nodeType !== 1) return
+    const el = n as Element
+    const block = BLOCK.has(el.tagName)
+    if (block && out && !out.endsWith('\n')) out += '\n'
+    if (el.tagName === 'TD' && out && !/[\s|]$/.test(out)) out += ' | '
+    for (const c of el.childNodes) walk(c)
+    if (block && out && !out.endsWith('\n')) out += '\n'
+  }
+  walk(root)
+  return out
+}
+
 /** Мягкие переносы и неразрывные пробелы, которыми нашпигована вёрстка сайта. */
 function clean(s: string): string {
   return s
@@ -99,19 +129,100 @@ function clean(s: string): string {
  */
 export function formulaFromAlt(alt: string): string {
   let s = ' ' + clean(alt) + ' '
-  // Дроби и корни могут быть вложенными — крутим, пока что-то меняется.
-  for (let pass = 0; pass < 6; pass++) {
+
+  // 1. Скобки. Их больше всего — в разборе по математике буквально тысячи,
+  // и без замены формула читается как протокол: «левая круглая скобка 91a…».
+  const BRACKETS: [string, string][] = [
+    ['левая круглая скобка', '('],
+    ['правая круглая скобка', ')'],
+    ['левая квадратная скобка', '['],
+    ['правая квадратная скобка', ']'],
+    ['левая фигурная скобка', '{'],
+    ['правая фигурная скобка', '}'],
+  ]
+  for (const [word, to] of BRACKETS) {
+    s = s.replace(new RegExp('(?<![\\p{L}])' + word + '(?![\\p{L}])', 'gu'), to)
+  }
+
+  // 2. Парные конструкции. Шаблон нарочно не пускает внутрь себя ещё одну такую
+  // же («(?!дробь:)»), поэтому находится САМАЯ ВНУТРЕННЯЯ, и вложенные дроби
+  // разворачиваются от середины наружу за несколько проходов. Со старым `[^:]*?`
+  // вложенная дробь ломала разбор и оставляла «числитель» прямо в тексте.
+  for (let pass = 0; pass < 8; pass++) {
     const before = s
     s = s.replace(
-      /дробь:\s*числитель:\s*([^:]*?),\s*знаменатель:\s*([^:]*?)\s*конец дроби/g,
+      /дробь:\s*числитель:\s*((?:(?!дробь:)[\s\S])*?),\s*знаменатель:\s*((?:(?!дробь:)[\s\S])*?)\s*конец дроби/g,
       (_m, a, b) => `(${a.trim()})/(${b.trim()})`,
     )
     s = s.replace(
-      /корень из:\s*начало аргумента:\s*(.*?)\s*конец аргумента/g,
+      /корень из:\s*начало аргумента:\s*((?:(?!корень из:)[\s\S])*?)\s*конец аргумента/g,
       (_m, a) => `√(${a.trim()})`,
     )
-    s = s.replace(/степень:\s*начало степени:\s*(.*?)\s*конец степени/g, (_m, a) => `^(${a.trim()})`)
+    s = s.replace(
+      /корень (\S+) степени из:\s*начало аргумента:\s*((?:(?!корень )[\s\S])*?)\s*конец аргумента/g,
+      (_m, n, a) => `корень ${n} степени из (${a.trim()})`,
+    )
+    s = s.replace(
+      /в степени:?\s*начало степени:?\s*((?:(?!в степени)[\s\S])*?)\s*конец степени/g,
+      (_m, a) => `^(${a.trim()})`,
+    )
+    s = s.replace(
+      /(целая|дробная) часть:\s*начало аргумента:\s*([\s\S]*?)\s*конец аргумента/g,
+      (_m, kind, a) => (kind === 'целая' ? `⌊${a.trim()}⌋` : `{${a.trim()}}`),
+    )
     if (s === before) break
+  }
+
+  // 3. Остатки LaTeX. Сайт местами отдаёт исходную разметку прямо в alt —
+  // в тексте это выглядело как «\overlineabcd» и «x \leqslant14d».
+  const LATEX: [RegExp, string][] = [
+    [/\\ldots|\\dots/g, '…'],
+    [/\\angle/g, '∠'],
+    [/\\geqslant|\\geq|\\ge(?![a-z])/g, ' ≥ '],
+    [/\\leqslant|\\leq|\\le(?![a-z])/g, ' ≤ '],
+    [/\\cup/g, ' ∪ '],
+    [/\\cap/g, ' ∩ '],
+    [/\\in(?![a-z])/g, ' ∈ '],
+    [/\\mapsto/g, ' ↦ '],
+    [/\\equiv/g, ' ≡ '],
+    [/\\Rightarrow/g, ' ⇒ '],
+    [/\\rightarrow|\\to(?![a-z])/g, ' → '],
+    [/\\pm/g, '±'],
+    [/\\times/g, '·'],
+    [/\\cdot/g, '·'],
+    [/\\tau/g, 'τ'],
+    [/\\sigma/g, 'σ'],
+    [/\\alpha/g, 'α'],
+    [/\\beta/g, 'β'],
+    [/\\varphi|\\phi/g, 'φ'],
+    [/\\infty/g, '∞'],
+    [/\\abs/g, '|'],
+  ]
+  for (const [re, to] of LATEX) s = s.replace(re, to)
+  // Черта над цифрами — так в математике записывают число по его цифрам (abcd).
+  // Ставим комбинируемое надчёркивание, чтобы это читалось как в учебнике.
+  s = s.replace(/\\overline\{?([A-Za-zА-Яа-я0-9]+)\}?/g, (_m, w: string) =>
+    [...w].map((c) => c + '̅').join(''),
+  )
+  // Всё оставшееся служебное (\left, \right, \quad, \mathop, \dfrac) просто снимаем.
+  s = s.replace(/\\[a-zA-Z]+\s?/g, '')
+
+  // Короткая степень без обёртки: «a в степени 4» — так сайт пишет, когда
+  // показатель простой. Конструкция «начало степени … конец степени» выше её
+  // не ловит, и в тексте оставалось «a_1 в степени 4».
+  s = s.replace(/\s*в степени\s+(-?\d+|[a-zA-Zа-яА-Я])(?![\p{L}\d])/gu, '^$1')
+
+  // 4. Слова-связки, которых конструкции выше не покрывают.
+  const PHRASES: [string, string][] = [
+    ['новая строка', '\n'],
+    ['равносильно', ' ⇔ '],
+    ['не принадлежит', ' ∉ '],
+    ['принадлежит', ' ∈ '],
+    ['система', 'система: '],
+    ['совокупность', 'совокупность: '],
+  ]
+  for (const [word, to] of PHRASES) {
+    s = s.replace(new RegExp('(?<![\\p{L}])' + word + '(?![\\p{L}])', 'gu'), to)
   }
   // Границу слова здесь НЕЛЬЗЯ писать через \b: в JS она определена через [A-Za-z0-9_],
   // и для кириллицы просто не срабатывает — /\bминус\b/ не найдёт «минус» никогда.
@@ -146,7 +257,12 @@ export function formulaFromAlt(alt: string): string {
   for (const [word, to] of WORDS) {
     s = s.replace(new RegExp('(?<![\\p{L}])' + word + '(?![\\p{L}])', 'gu'), to)
   }
-  return s.replace(/\s+/g, ' ').replace(/\s*([²³°])/g, '$1').trim()
+  // Пробелы схлопываем, но НЕ переносы: «новая строка» выше ставит их осмысленно.
+  return s
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .replace(/\s*([²³°])/g, '$1')
+    .trim()
 }
 
 /** Задание, снятое со страницы. */
@@ -158,6 +274,8 @@ export interface ScrapedTask {
   text: string
   answer?: string
   solution?: string
+  /** Критерии оценивания — есть только у заданий второй части. */
+  criteria?: string
   /** Адреса чертежей: без них часть заданий нерешаема. */
   imageUrls: string[]
 }
@@ -182,7 +300,12 @@ export function parsePrintPage(html: string, host: string): ScrapedTask[] {
    * задвоится.
    */
   const candidates = blocks.map((block) => {
-    const found = [...block.querySelectorAll('.probtext, .pbody')]
+    const found = [...block.querySelectorAll('.probtext, .pbody')].filter(
+      // Критерии оценивания у заданий второй части лежат в СВОЁМ .pbody внутри
+      // .prob_crits. Отсекать их надо здесь, по предку: если выкидывать позже,
+      // из склеенной копии .prob_crits уже не виден — он остался снаружи.
+      (el) => !el.closest('.prob_crits'),
+    )
     return found.filter((el) => !found.some((o) => o !== el && o.contains(el)))
   })
 
@@ -220,7 +343,13 @@ export function parsePrintPage(html: string, host: string): ScrapedTask[] {
     }
     // body уже собран из копий — правим его на месте.
     const copy = body
-    for (const n of copy.querySelectorAll('.solution, .answer, .prob_nums, .minor, .attr9, .prob_answer')) {
+    // .prob_crits — таблица критериев оценивания у заданий второй части. В условие
+    // она попадать не должна: ученик видел «…Найдите наименьшее простое число,
+    // Критерии оценивания выполнения заданияБаллыВерно получены все…».
+    // Сами критерии ценные, поэтому не выбрасываем, а забираем отдельным полем.
+    const critsEl = copy.querySelector('.prob_crits') ?? block.querySelector('.prob_crits')
+    const criteria = critsEl ? clean(blockText(critsEl)) : undefined
+    for (const n of copy.querySelectorAll('.solution, .answer, .prob_nums, .minor, .attr9, .prob_answer, .prob_crits')) {
       n.remove()
     }
     const imageUrls: string[] = []
@@ -240,7 +369,7 @@ export function parsePrintPage(html: string, host: string): ScrapedTask[] {
       img.replaceWith(doc.createTextNode('\n[чертёж]\n'))
     }
 
-    const text = clean(copy.textContent ?? '')
+    const text = clean(blockText(copy))
     const answerRaw = clean(block.querySelector('.answer')?.textContent ?? '')
     const answer = answerRaw.replace(/^Ответ:\s*/i, '').trim() || undefined
     const solCopy = block.querySelector('.solution')?.cloneNode(true) as HTMLElement | undefined
@@ -253,9 +382,9 @@ export function parsePrintPage(html: string, host: string): ScrapedTask[] {
         }
       }
     }
-    const solution = solCopy ? clean(solCopy.textContent ?? '').replace(/^Пояснение[^.]*\.\s*/i, '') : undefined
+    const solution = solCopy ? clean(blockText(solCopy)).replace(/^Пояснение[^.]*\.\s*/i, '') : undefined
 
-    if (text.length > 15) out.push({ taskNo, sourceId, text, answer, solution, imageUrls })
+    if (text.length > 15) out.push({ taskNo, sourceId, text, answer, solution, criteria, imageUrls })
   }
   return out
 }

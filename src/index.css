@@ -2311,3 +2311,91 @@ label.field > span {
   background: #fff;
   padding: 8px;
 }
+
+/* ---------- Задание в тренажёре ---------- */
+
+/* Условие. Крупнее и просторнее обычного текста: его читают внимательно, а не
+   пробегают глазами, и в нём есть структура — пункты а), б), в) и ряды 1)…5),
+   которые должны стоять каждый со своей строки. */
+.q-text {
+  font-size: 16px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 2px 0 4px;
+}
+/* Строки-варианты внутри условия отбиваем от остального текста отступом слева —
+   без этого «1) …2) …3) …» сливается в абзац. */
+.q-text::first-line { font-weight: inherit; }
+
+/* Метка второй части: другой жанр работы, и это должно быть видно сразу. */
+.chip-part2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: var(--warn, #d09a2c);
+  background: color-mix(in srgb, var(--warn, #d09a2c) 12%, transparent);
+  color: var(--warn, #a4760f);
+  font-weight: 600;
+}
+
+/* ---------- Поле ответа как в бланке ---------- */
+
+.cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.cell {
+  width: 30px;
+  height: 38px;
+  padding: 0;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--card, #fff);
+  color: inherit;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.cell:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.cell.filled { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.cell:disabled { opacity: 0.75; }
+
+/* ---------- Разбор ---------- */
+
+/* Разбор — это то, ради чего решают неверно. Он должен читаться как объяснение,
+   а не как сноска: отдельная карточка, свой размер, сохранённые переносы. */
+.solution-box {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  background: var(--card-soft, color-mix(in srgb, var(--accent) 4%, transparent));
+}
+.sol-head {
+  display: block;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 8px;
+  cursor: inherit;
+}
+.sol-body {
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.crit-box { border-left-color: var(--warn, #d09a2c); }
+.crit-box > summary { cursor: pointer; list-style: revert; }
+.crit-box[open] > summary { margin-bottom: 8px; }

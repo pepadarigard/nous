@@ -17,6 +17,13 @@ export default function BankDownload({ onDone }: { onDone?: () => void }) {
   const data = useStore((s) => s.data)
   const addQuestions = useStore((s) => s.addQuestions)
 
+  // Сколько заданий с Решу ЕГЭ уже лежит по каждому предмету.
+  const have: Record<string, number> = {}
+  for (const q of data.questions ?? []) {
+    if (q.sourceId?.startsWith('sdamgia:')) have[q.subjectId] = (have[q.subjectId] ?? 0) + 1
+  }
+  const totalHave = Object.values(have).reduce((a, b) => a + b, 0)
+
   const mine = (data.subjects.length ? data.subjects : BANK_SUBJECTS).filter(canDownload)
   const [chosen, setChosen] = useState<string[]>(mine)
   const [perTask, setPerTask] = useState(50)
@@ -82,7 +89,7 @@ export default function BankDownload({ onDone }: { onDone?: () => void }) {
         Займёт несколько минут: между запросами приложение выжидает паузу, чтобы не мешать сайту.
       </p>
 
-      <div className="row wrap" style={{ gap: 8, marginBottom: 14 }}>
+      <div className="row wrap" style={{ gap: 8, marginBottom: 6 }}>
         {BANK_SUBJECTS.map((id) => (
           <button
             key={id}
@@ -92,9 +99,18 @@ export default function BankDownload({ onDone }: { onDone?: () => void }) {
             style={chosen.includes(id) ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-text)' } : undefined}
           >
             {subjectById(id)?.emoji} {subjectById(id)?.short ?? id}
+            {have[id] ? <span className="small muted"> · {have[id]}</span> : null}
           </button>
         ))}
       </div>
+      {/* Что уже есть — чтобы было понятно, докачиваем мы или качаем впервые.
+          Повторная загрузка не дублирует: уже лежащие в банке задания пропускаются,
+          поэтому её же можно жать, чтобы забрать появившееся на сайте новое. */}
+      <p className="small muted" style={{ marginTop: 0, marginBottom: 14 }}>
+        {totalHave
+          ? `В банке уже ${countOf(totalHave, ['задание', 'задания', 'заданий'])} с Решу ЕГЭ. Повторная загрузка ничего не задвоит — возьмёт только то, чего ещё нет.`
+          : 'Банк с Решу ЕГЭ пока пуст.'}
+      </p>
 
       <div className="row wrap" style={{ gap: 16, marginBottom: 16 }}>
         <label className="small">
@@ -143,7 +159,7 @@ export default function BankDownload({ onDone }: { onDone?: () => void }) {
           </button>
         ) : (
           <button className="btn btn-primary btn-lg" disabled={!chosen.length} onClick={run}>
-            <Download size={16} /> Загрузить задания
+            <Download size={16} /> {totalHave ? 'Докачать задания' : 'Загрузить задания'}
           </button>
         )}
         <div className="spacer" />

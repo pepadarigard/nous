@@ -7,6 +7,7 @@ import { isCorrect, taskStats, trainingQueue } from '../lib/bank'
 import { dueForReview } from '../lib/review'
 import { REVIEW_SESSION } from '../lib/today'
 import { canGenerate, generateTasks, generatedNumbers } from '../lib/taskgen'
+import { isPart2, part2Label } from '../data/egeTasks'
 import { todayISO } from '../lib/schedule'
 import { countOf } from '../lib/plural'
 import BankImport from './BankImport'
@@ -14,6 +15,7 @@ import SolutionCheck from './SolutionCheck'
 import Mock from './Mock'
 import Modal from '../ui/Modal'
 import TaskFigures from '../ui/TaskFigures'
+import CellAnswer from '../ui/CellAnswer'
 import { Play, Plus, BarChart3, Trash2, Check, X, RotateCcw, ListChecks, Lightbulb, ScrollText, Timer } from 'lucide-react'
 
 type Tab = 'train' | 'check' | 'mock' | 'bank' | 'stats'
@@ -256,11 +258,15 @@ function TrainTab({
   if (session && q) {
     const s = subjectById(q.subjectId)
     const answered = verdict !== 'unchecked'
+    const part2 = isPart2(q.subjectId, q.taskNo)
     return (
       <div className="card" style={{ maxWidth: 760 }}>
         <div className="row wrap" style={{ gap: 8, marginBottom: 12 }}>
           <span className="chip">{s?.emoji} {s?.short ?? q.subjectId}</span>
           {q.taskNo ? <span className="chip">задание №{q.taskNo}</span> : null}
+          {/* Вторая часть — другой жанр: решают на листе, оценивают по критериям.
+              Ученик должен понимать это до того, как начнёт писать. */}
+          {part2 && <span className="chip chip-part2"><ScrollText size={13} /> {part2Label(q.subjectId, q.taskNo)}</span>}
           {q.topic ? <span className="chip">{q.topic}</span> : null}
           <div className="spacer" />
           <span className="small muted">{session.idx + 1} из {session.queue.length} · верно {session.correct}</span>
@@ -274,22 +280,39 @@ function TrainTab({
           </ul>
         )}
 
-        <label className="field" style={{ marginTop: 14 }}>
-          <span>Твой ответ</span>
-          <input
-            className="input"
-            autoFocus
-            value={given}
-            disabled={answered}
-            onChange={(e) => setGiven(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter') return
-              if (answered) next()
-              else check()
-            }}
-            placeholder="впиши ответ, как на экзамене"
-          />
-        </label>
+        {part2 ? (
+          <label className="field" style={{ marginTop: 16 }}>
+            <span>Твой ответ</span>
+            <div className="small muted" style={{ marginBottom: 6 }}>
+              Решай на листе, как на экзамене, — здесь запиши итоговый ответ. Полное решение
+              можно разобрать по критериям во вкладке «Развёрнутый ответ».
+            </div>
+            <textarea
+              className="input"
+              rows={3}
+              autoFocus
+              value={given}
+              disabled={answered}
+              onChange={(e) => setGiven(e.target.value)}
+              placeholder="например: а) да; б) нет; в) 11"
+            />
+          </label>
+        ) : (
+          <div className="field" style={{ marginTop: 16 }}>
+            <span>Твой ответ</span>
+            <div className="small muted" style={{ marginBottom: 8 }}>
+              Как в бланке: с первой клетки, по одному символу, без пробелов и запятых между
+              номерами.
+            </div>
+            <CellAnswer
+              value={given}
+              onChange={setGiven}
+              onEnter={() => (answered ? next() : check())}
+              disabled={answered}
+              autoFocus
+            />
+          </div>
+        )}
 
         {verdict === true && <div className="verdict ok"><Check size={16} /> Верно!</div>}
         {verdict === false && (
@@ -302,17 +325,25 @@ function TrainTab({
             <Lightbulb size={16} />
             <div style={{ flex: 1 }}>
               У этого задания нет эталонного ответа — сверься с разбором и отметь сам.
-              {q.solution && <div className="small" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>{q.solution}</div>}
+              {q.solution && <div className="sol-body" style={{ marginTop: 6 }}>{q.solution}</div>}
             </div>
             <button className="btn btn-sm" onClick={() => selfMark(true)}>Решил верно</button>
             <button className="btn btn-sm" onClick={() => selfMark(false)}>Ошибся</button>
           </div>
         )}
         {answered && verdict !== null && q.solution && (
-          <div className="card soft" style={{ marginTop: 12 }}>
-            <b className="small">Разбор</b>
-            <div className="small" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{q.solution}</div>
+          <div className="solution-box">
+            <b className="sol-head">Разбор</b>
+            <div className="sol-body">{q.solution}</div>
           </div>
+        )}
+        {/* Критерии показываем только после ответа: до него они подсказывают,
+            из скольких пунктов состоит решение. */}
+        {answered && q.criteria && (
+          <details className="solution-box crit-box">
+            <summary className="sol-head">Критерии оценивания</summary>
+            <div className="sol-body">{q.criteria}</div>
+          </details>
         )}
 
         <div className="row" style={{ marginTop: 16 }}>

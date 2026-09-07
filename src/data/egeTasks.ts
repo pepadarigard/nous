@@ -130,3 +130,22 @@ export function hasTaskMap(subjectId: string): boolean {
 }
 
 export const OFFLINE_SUBJECTS = Object.keys(EGE_TASKS)
+
+/**
+ * Задание второй части: развёрнутый ответ, а не строка в бланк.
+ *
+ * Для приложения это принципиально другой режим. Такие задания решают на листе,
+ * ответ оценивается по критериям, а не сверяется с эталоном, и поле в клеточку
+ * им не подходит: у задачи с параметром «ответ» — это несколько страниц выкладок.
+ */
+export function isPart2(subjectId: string, taskNo?: number): boolean {
+  if (!taskNo) return false
+  return Boolean(EGE_TASKS[subjectId]?.find((t) => t.no === taskNo)?.part2)
+}
+
+/** Как назвать вторую часть у этого предмета — сочинение это или развёрнутый ответ. */
+export function part2Label(subjectId: string, taskNo?: number): string {
+  if (!isPart2(subjectId, taskNo)) return ''
+  if (subjectId === 'russian') return 'сочинение'
+  return 'вторая часть'
+}

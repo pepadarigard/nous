@@ -53,6 +53,13 @@ export const REVIEW_SESSION = 20
 const LESSON_MINUTES: Record<Lesson['kind'], number> = { theory: 25, practice: 30, review: 30 }
 
 /**
+ * Ниже этого числа минут день считается пустоватым и в него подтягивается работа
+ * из ближайшего будущего. Полчаса — это одно занятие: меньше похоже на то, что
+ * приложению нечего предложить.
+ */
+const LIGHT_DAY_MIN = 30
+
+/**
  * Готово ли занятие-повторение. Повторять то, чего ещё не проходил, бессмысленно:
  * в свежем плане такие занятия есть с первого дня, и приложение звало «повторить
  * задания № 1–5», когда ученик не открыл ещё ни одной темы.
@@ -151,22 +158,31 @@ export function buildToday(data: AppData): TodayPlan {
     })
   }
 
-  // --- выходной, но план ещё идёт: предлагаем взять вперёд ---
-  // «Ничего не назначено» — плохой ответ учителя. Особенно в первый день после
-  // настройки: человек пришёл заниматься, а приложение отправляет его домой.
-  if (!items.length && data.plan) {
+  // --- слишком лёгкий день: предлагаем взять следующее вперёд ---
+  //
+  // «Ничего не назначено» — плохой ответ учителя. Но и «сегодня на пять минут»
+  // немногим лучше: за три месяца прогона таких почти пустых дней набралось 13,
+  // а перегруженных (за полтора часа) — 8. Ровный темп важнее буквального
+  // следования календарю, поэтому в лёгкий день достаём работу из ближайшего
+  // будущего — по одному занятию, не сваливая всё сразу.
+  const plannedMinutes = items.filter((i) => !i.done && i.kind !== 'catchup').reduce((n, i) => n + i.minutes, 0)
+  if (plannedMinutes < LIGHT_DAY_MIN && data.plan) {
+    const taken = new Set(items.map((i) => i.id))
     const nextDay = Object.keys(agenda)
       .filter((d) => d > today && agenda[d].length)
       .sort()[0]
-    const next = nextDay ? agenda[nextDay].find((i) => !i.lesson.done && !isMock(i.lesson)) : undefined
+    const next = nextDay
+      ? agenda[nextDay].find((i) => !i.lesson.done && !isMock(i.lesson) && !taken.has(i.lesson.id))
+      : undefined
     if (next) {
       items.push({
         id: next.lesson.id,
         kind: 'lesson',
         title: next.lesson.title,
-        detail:
-          'Сегодня по расписанию выходной. Если есть силы — возьми это занятие вперёд, ' +
-          'дальше будет свободнее.',
+        detail: plannedMinutes
+          ? 'Сегодня день лёгкий — возьми это занятие вперёд, дальше будет свободнее.'
+          : 'Сегодня по расписанию выходной. Если есть силы — возьми это занятие вперёд, ' +
+            'дальше будет свободнее.',
         minutes: LESSON_MINUTES[next.lesson.kind],
         action: { type: 'lesson', blockId: next.block.id, lessonId: next.lesson.id },
         done: false,
