@@ -14,7 +14,7 @@
 
 import type { AppData, Block, Lesson } from '../types'
 import { agendaByDate, overdueItems, buildAgenda, todayISO } from './schedule'
-import { dueForReview } from './review'
+import { reviewSummary } from './review'
 import { weakSpots } from './bank'
 import { SCORING } from '../data/scoring'
 import { subjectName } from '../data/subjects'
@@ -47,6 +47,9 @@ export interface TodayPlan {
   headline: string
 }
 
+/** Сколько заданий берёт один заход тренажёра. Должно совпадать с Trainer.tsx. */
+export const REVIEW_SESSION = 20
+
 const LESSON_MINUTES: Record<Lesson['kind'], number> = { theory: 25, practice: 30, review: 30 }
 
 /**
@@ -78,15 +81,23 @@ export function buildToday(data: AppData): TodayPlan {
     : 0
 
   // --- 1. повторение ---
-  const due = dueForReview(questions, attempts, today, 40)
-  if (due.length) {
+  // Обещаем ровно столько, сколько влезет в один заход тренажёра. Раньше здесь
+  // стояло 40, тренажёр показывал всю очередь (бывает под сотню), а в подход брал
+  // 20 — три разных числа про одно и то же дело. Если ученику говорят «иди сверху
+  // вниз, порядок правильный», числа обязаны сходиться.
+  const backlog = reviewSummary(questions, attempts, today).due
+  if (backlog) {
+    const take = Math.min(backlog, REVIEW_SESSION)
     items.push({
       id: 'review',
       kind: 'review',
-      title: 'Повторить ' + due.length + ' ' + plural(due.length, 'задание', 'задания', 'заданий'),
+      title: 'Повторить ' + take + ' ' + plural(take, 'задание', 'задания', 'заданий'),
       detail:
-        'Эти задания пора освежить, пока не забылись. Ответишь верно — вернутся не скоро, ошибёшься — завтра.',
-      minutes: Math.max(5, Math.round(due.length * 1.5)),
+        backlog > take
+          ? 'Освежить пора ' + backlog + ' — беру самые просроченные ' + take + ', остальные подтянутся ' +
+            'в следующие дни. Ответишь верно — вернутся не скоро, ошибёшься — завтра.'
+          : 'Эти задания пора освежить, пока не забылись. Ответишь верно — вернутся не скоро, ошибёшься — завтра.',
+      minutes: Math.max(5, Math.round(take * 1.5)),
       action: { type: 'trainer', review: true },
       done: false,
     })

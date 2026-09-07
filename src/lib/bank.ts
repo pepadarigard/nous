@@ -15,7 +15,10 @@ export function normAnswer(s: string): string {
     .replace(/ё/g, 'е')
     .replace(/[\s ]+/g, '')
     .replace(/[.,;:!?"'`«»]+$/g, '')
-    .replace(/^[.,;:!?"'`«»]+/g, '')
+    // Ведущая пунктуация — мусор от копирования, НО «,5» и «.5» это число:
+    // отрицательный просмотр вперёд не даёт срезать разделитель перед цифрой.
+    .replace(/^[.,;:!?"'`«»]+(?!\d)/g, '')
+    .replace(/^[;:!?"'`«»]+/g, '')
     .replace(/,/g, '.') // 3,5 и 3.5 — один и тот же ответ
     .trim()
 }
@@ -30,7 +33,27 @@ function answerForms(s: string): string[] {
   const norm = normAnswer(s)
   const parts = norm.split('.')
   const digitList = parts.length > 1 && parts.every((p) => /^\d$/.test(p))
-  return digitList ? [norm, parts.join('')] : [norm]
+  const forms = digitList ? [norm, parts.join('')] : [norm]
+  // Число ещё и в каноническом виде: «14,40», «14,4» и «014.4» — один ответ.
+  // Без этого лишний ноль в конце превращал верное решение в ошибку.
+  const canon = canonNumber(norm)
+  if (canon !== null && !forms.includes(canon)) forms.push(canon)
+  return forms
+}
+
+/**
+ * Ответ как число, приведённое к одному виду: без хвостовых нулей, без ведущих
+ * нулей, минус нормализован. null — если это не одно число (слово, перечисление,
+ * дробь «2/3»), тогда сравниваем как текст.
+ */
+function canonNumber(norm: string): string | null {
+  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(norm)) return null
+  const n = Number(norm)
+  if (!Number.isFinite(n)) return null
+  // toString сам убирает хвостовые и ведущие нули; экспоненциальную запись
+  // (1e-7) в ответах ЕГЭ не встретишь, но на всякий случай отбрасываем.
+  const out = String(n)
+  return out.includes('e') ? null : out
 }
 
 /** Совпадает ли ответ с эталоном. Несколько допустимых эталонов пишутся через | */

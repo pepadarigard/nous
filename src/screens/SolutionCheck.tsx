@@ -6,7 +6,7 @@ import type { SolutionReview } from '../types'
 import { checkSolution, findCriteria } from '../lib/aiTutor'
 import { aiReady } from '../lib/providers'
 import { humanError, loadMaterialText } from '../lib/api'
-import { mdToHtml } from '../lib/md'
+import Markdown from '../ui/Markdown'
 import { AlertTriangle, Check, Loader2, ScrollText, Sparkles } from 'lucide-react'
 
 /**
@@ -205,7 +205,7 @@ function ReviewCard({ review }: { review: SolutionReview }) {
         </div>
       )}
       {review.advice && (
-        <div className="md-body" style={{ marginTop: 14 }} dangerouslySetInnerHTML={{ __html: mdToHtml(review.advice) }} />
+        <Markdown text={review.advice} style={{ marginTop: 14 }} />
       )}
     </div>
   )

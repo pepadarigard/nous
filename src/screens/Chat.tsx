@@ -1,20 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../store'
 import { mdToHtml } from '../lib/md'
-import { openExternal } from '../lib/api'
+import Markdown from '../ui/Markdown'
 import { subjectName } from '../data/subjects'
 import { Send, Trash2, Copy, Check, ArrowUpRight } from 'lucide-react'
-
-// Ссылки в ответах ИИ открываем во внешнем браузере, а не внутри окна приложения.
-function handleLinkClick(e: React.MouseEvent) {
-  const a = (e.target as HTMLElement).closest('a.md-link') as HTMLAnchorElement | null
-  if (!a) return
-  const href = a.getAttribute('href') || ''
-  if (/^https?:\/\//i.test(href)) {
-    e.preventDefault()
-    openExternal(href)
-  }
-}
 
 // Живые фразы ожидания: показываются, пока модель ещё не начала отвечать.
 const THINK_PHRASES = [
@@ -125,7 +114,7 @@ export default function Chat() {
         </div>
       </div>
       <div className="chat-wrap">
-        <div className="chat-scroll" ref={scrollRef} onClick={handleLinkClick}>
+        <div className="chat-scroll" ref={scrollRef}>
           {msgs.length === 0 && !busy && (
             <div className="chat-empty">
               <div className="ce-av">ν</div>
@@ -156,7 +145,7 @@ export default function Chat() {
               <div key={i} className="msg-ai">
                 <div className="ai-av">ν</div>
                 <div className="ai-col">
-                  <div className="bubble ai md-body" dangerouslySetInnerHTML={{ __html: html }} />
+                  <Markdown className="bubble ai" html={html} />
                   {!live && (
                     <div className="msg-tools">
                       <button className="tool-btn" onClick={() => copyMsg(i, m.content)}>

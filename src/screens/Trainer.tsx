@@ -5,6 +5,7 @@ import { SUBJECTS, subjectById } from '../data/subjects'
 import type { Attempt, Question } from '../types'
 import { isCorrect, taskStats, trainingQueue } from '../lib/bank'
 import { dueForReview } from '../lib/review'
+import { REVIEW_SESSION } from '../lib/today'
 import { canGenerate, generateTasks, generatedNumbers } from '../lib/taskgen'
 import { todayISO } from '../lib/schedule'
 import { countOf } from '../lib/plural'
@@ -193,7 +194,7 @@ function TrainTab({
 
   function start() {
     // В повторении очередь уже выстроена по срочности — перемешивать её нельзя.
-    const queue = onlyDue ? pool.slice(0, 20) : trainingQueue(pool, attempts, 20)
+    const queue = onlyDue ? pool.slice(0, REVIEW_SESSION) : trainingQueue(pool, attempts, REVIEW_SESSION)
     if (!queue.length) return
     setSession({ queue, idx: 0, correct: 0, wrong: 0 })
     setGiven('')
@@ -372,7 +373,7 @@ function TrainTab({
         <button className="btn btn-primary btn-lg" disabled={!pool.length} onClick={start}><Play size={16} /> Начать</button>
       </div>
       <p className="small muted" style={{ marginBottom: 0, marginTop: 12 }}>
-        В подход берётся до 20 заданий: сначала те, где ошибался, потом нерешённые.
+        В подход берётся до {REVIEW_SESSION} заданий: сначала те, где ошибался, потом нерешённые.
       </p>
     </div>
   )

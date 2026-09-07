@@ -10,7 +10,7 @@ import { humanError, isTauri, loadMaterialText, openMaterialFile, uid } from '..
 import { humanSize } from '../lib/extract'
 import { lessonBrief } from '../lib/aiTutor'
 import { aiReady } from '../lib/providers'
-import { mdToHtml } from '../lib/md'
+import Markdown from '../ui/Markdown'
 import type { Block, Lesson, Material, Question } from '../types'
 
 const kindLabel: Record<Lesson['kind'], string> = { theory: 'Теория', practice: 'Практика', review: 'Повторение' }
@@ -400,7 +400,7 @@ function BriefCard({ block, lesson }: { block: Block; lesson: Lesson }) {
 
       {brief && (
         <>
-          {brief.theory && <div className="md-body" dangerouslySetInnerHTML={{ __html: mdToHtml(brief.theory) }} />}
+          {brief.theory && <Markdown text={brief.theory} />}
           {brief.tasks.length > 0 && (
             <div style={{ marginTop: 12 }}>
               <b className="small">Задания</b>

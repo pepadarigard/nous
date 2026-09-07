@@ -7,7 +7,7 @@ import { currentStreak } from '../lib/stats'
 import { weeklyAdvice, type WeekAdvice } from '../lib/aiTutor'
 import { aiReady } from '../lib/providers'
 import { humanError } from '../lib/api'
-import { mdToHtml } from '../lib/md'
+import Markdown from '../ui/Markdown'
 import Modal from '../ui/Modal'
 import PlanExtender from './PlanExtender'
 import { ArrowDownToLine, Loader2, Sparkles, TrendingUp, Wand2 } from 'lucide-react'
@@ -118,7 +118,7 @@ export default function WeekReview() {
 
       {advice && (
         <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-          <div className="md-body" dangerouslySetInnerHTML={{ __html: mdToHtml(advice.verdict) }} />
+          <Markdown text={advice.verdict} />
           {advice.focus.length > 0 && (
             <>
               <b className="small">На чём сосредоточиться</b>
