@@ -191,7 +191,7 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
                 <span style={{ fontSize: 20 }}>{s?.emoji || '📘'}</span>
                 <b>{s?.short || r.subjectId}</b>
                 <div className="spacer" />
-                <span className="chip">{r.total} занятий</span>
+                <span className="chip">{countOf(r.total, ['занятие', 'занятия', 'занятий'])}</span>
               </div>
               <div className="row wrap small muted" style={{ marginTop: 8, gap: 12 }}>
                 <span>📖 теория: {r.theory}</span>
@@ -217,10 +217,10 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
       <div className="card soft" style={{ marginBottom: 18 }}>
         <div className="row" style={{ gap: 10, marginBottom: 6 }}>
           <WifiOff size={17} color="var(--accent)" />
-          <b>Без ИИ и без интернета</b>
+          <b>Готовый план по структуре экзамена</b>
         </div>
         <p className="small muted" style={{ marginTop: 0 }}>
-          Соберу план прямо здесь, по структуре экзамена. Выбери стратегию — они отличаются не
+          Соберу прямо здесь, без интернета и без ИИ. Выбери стратегию — они отличаются не
           оформлением, а тем, на что тратится время: номера берутся с учётом их веса в первичных
           баллах. Если в тренажёре уже копится статистика, по слабым номерам добавлю подход.
         </p>
@@ -274,6 +274,15 @@ export default function PlanImporter({ onDone }: { onDone: () => void }) {
           </>
         )}
       </div>
+
+      {/* Путь через внешний ИИ — запасной, а не основной: он требует чужой сервис,
+          интернет и ручного копирования туда-обратно. Подписан так прямо, чтобы
+          человек не решил, будто без ChatGPT плана не будет. */}
+      <div className="divider" />
+      <p className="muted small" style={{ marginTop: 0 }}>
+        <b>Другой путь:</b> получить план от внешнего ИИ или вставить свой готовый. Нужен, если
+        предмета нет в готовых структурах или хочется план под себя.
+      </p>
 
       <div className="row" style={{ gap: 8 }}>
         {chip('Шаг 1')}

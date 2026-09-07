@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { SUBJECTS, WEEKDAYS, subjectName } from '../data/subjects'
 import { checkApiKey, humanError, isTauri, openExternal } from '../lib/api'
+import { aiReady } from '../lib/providers'
 import { modelLabel, pickBestModel } from '../lib/models'
 import { ONBOARDING_PROVIDERS, PROVIDERS, PROVIDER_ORDER, isLocal, keyOf, keyPatch, normProvider } from '../lib/providers'
 import type { Provider } from '../types'
@@ -10,13 +11,18 @@ import PlanImporter from './PlanImporter'
 import { Check, KeyRound, ArrowRight, ArrowLeft, Target, Sparkles } from 'lucide-react'
 
 type Step = 'welcome' | 'setup' | 'subjects' | 'goals' | 'schedule' | 'questions' | 'import'
-const STEPS: Step[] = ['welcome', 'setup', 'subjects', 'goals', 'schedule', 'questions', 'import']
-// Точки прогресса — без приветственного экрана.
-const DOT_STEPS = STEPS.filter((s) => s !== 'welcome')
+// Порядок не случайный: сначала приложение узнаёт про УЧЕНИКА и собирает план,
+// и только потом предлагает ИИ. Раньше настройка ИИ была первым экраном — человек
+// видел просьбу ввести API-ключ раньше, чем хоть что-то полезное, и приложение
+// выглядело надстройкой над чужой моделью, хотя работает целиком без неё.
+const STEPS: Step[] = ['welcome', 'subjects', 'goals', 'schedule', 'setup', 'questions', 'import']
 
 export default function Onboarding() {
   const store = useStore()
   const [step, setStep] = useState<Step>('welcome')
+  // Точки прогресса: приветствие не считается, а шаг вопросов существует
+  // только при подключённом ИИ — иначе он пропускается и точка врала бы.
+  const dotSteps = STEPS.filter((s) => s !== 'welcome' && (s !== 'questions' || aiReady(store.data.config)))
 
   // OpenRouter по умолчанию — работает в России без VPN.
   const [prov, setProv] = useState<Provider>(normProvider(store.data.config.provider))
@@ -98,12 +104,13 @@ export default function Onboarding() {
     let cfg = store.data.config
     for (const p of PROVIDER_ORDER) cfg = { ...cfg, ...keyPatch(cfg, p, keys[p]) }
     store.setConfig({ ...cfg, provider: prov, textModel: model, modelAutoPicked: true })
-    setStep('subjects')
+    setStep('questions')
   }
   // ИИ — не обязателен: без ключа приложение всё равно строит план, хранит материалы и гоняет по заданиям.
   function skipSetup() {
     store.setConfig({ provider: prov, textModel: PROVIDERS[prov].defaultModel })
-    setStep('subjects')
+    // Без ИИ вопросы «в промт» спрашивать не у кого — сразу к плану.
+    setStep('import')
   }
 
   function saveSubjectsAndNext() {
@@ -119,7 +126,7 @@ export default function Onboarding() {
     store.setSchedules(sel.map((id) => ({ subjectId: id, hoursPerWeek: Number(hours[id]) || 4, days: days[id] ?? [1, 3, 5] })))
     // Дату не спрашиваем: все готовятся к ЕГЭ 2027 (основной период — конец мая). Сменить можно в Настройках.
     store.setExamDate(store.data.examDate || EXAM_DATE_DEFAULT)
-    setStep('questions')
+    setStep('setup')
   }
   function setSubjAnswer(id: string, field: 'level' | 'wish', val: string) {
     setSubjAnswers((a) => {
@@ -148,8 +155,8 @@ export default function Onboarding() {
       <div className={'onb-card fade-in' + (step === 'welcome' ? ' onb-welcome' : '')}>
         {step !== 'welcome' && (
           <div className="stepper">
-            {DOT_STEPS.map((s, i) => (
-              <div key={s} className={'dot' + (i <= DOT_STEPS.indexOf(step) ? ' on' : '')} />
+            {dotSteps.map((s, i) => (
+              <div key={s} className={'dot' + (i <= dotSteps.indexOf(step) ? ' on' : '')} />
             ))}
           </div>
         )}
@@ -167,7 +174,7 @@ export default function Onboarding() {
               <div className="w-feat"><span className="w-ic">🎯</span><div><b>Теория и тренажёр внутри</b><span>разбор каждого номера, задания с проверкой ответа и повторение по интервалам</span></div></div>
               <div className="w-feat"><span className="w-ic">📈</span><div><b>Честный балл</b><span>считается по решённому, а не по галочкам; ИИ можно подключить, но он не обязателен</span></div></div>
             </div>
-            <button className="btn btn-primary btn-lg w-cta" onClick={() => setStep('setup')}>
+            <button className="btn btn-primary btn-lg w-cta" onClick={() => setStep('subjects')}>
               Начать подготовку <ArrowRight size={18} />
             </button>
             <p className="small muted w-note">Бесплатно · без регистрации · все данные хранятся только у тебя</p>
@@ -260,7 +267,7 @@ export default function Onboarding() {
         {step === 'subjects' && (
           <div className="fade-in">
             <h1 style={{ fontSize: 24 }}>Кто ты и что сдаёшь?</h1>
-            <p className="muted" style={{ marginTop: 0 }}>Это нужно, чтобы собрать точный промт для ИИ.</p>
+            <p className="muted" style={{ marginTop: 0 }}>По предметам приложение соберёт план: какие номера экзамена закрывать и в каком порядке.</p>
             <label className="field">
               <span>Как тебя зовут? (необязательно)</span>
               <input className="input" placeholder="Имя" value={name} onChange={(e) => setName(e.target.value)} />
@@ -279,7 +286,7 @@ export default function Onboarding() {
             </div>
             <div className="divider" />
             <div className="row">
-              <button className="btn btn-ghost" onClick={() => setStep('setup')}><ArrowLeft size={16} /> Назад</button>
+              <button className="btn btn-ghost" onClick={() => setStep('welcome')}><ArrowLeft size={16} /> Назад</button>
               <div className="spacer" />
               <span className="muted small">{sel.length} выбрано</span>
               <button className="btn btn-primary btn-lg" disabled={!sel.length} onClick={saveSubjectsAndNext}>Далее <ArrowRight size={17} /></button>
@@ -368,7 +375,7 @@ export default function Onboarding() {
               <Sparkles size={22} color="var(--accent)" />
               <h1 style={{ fontSize: 23, margin: 0 }}>Пара вопросов по каждому предмету</h1>
             </div>
-            <p className="muted" style={{ marginTop: 6 }}>Ответь коротко — это пойдёт в промт, чтобы план попал точно в твои слабые места. Любое поле можно пропустить.</p>
+            <p className="muted" style={{ marginTop: 6 }}>Ты подключил ИИ — эти ответы пойдут в промт, чтобы план попал точно в слабые места. Любое поле можно пропустить, план соберётся и без них.</p>
             {sel.map((id) => (
               <div className="card soft" key={id} style={{ marginBottom: 12 }}>
                 <div className="row" style={{ marginBottom: 10 }}>
@@ -400,7 +407,7 @@ export default function Onboarding() {
             </label>
             <div className="divider" />
             <div className="row">
-              <button className="btn btn-ghost" onClick={() => setStep('schedule')}><ArrowLeft size={16} /> Назад</button>
+              <button className="btn btn-ghost" onClick={() => setStep('setup')}><ArrowLeft size={16} /> Назад</button>
               <div className="spacer" />
               <button className="btn btn-primary btn-lg" onClick={saveQuestionsAndNext}>К плану <ArrowRight size={17} /></button>
             </div>
@@ -411,12 +418,15 @@ export default function Onboarding() {
           <div className="fade-in">
             <div className="row" style={{ gap: 10, marginBottom: 2 }}>
               <Sparkles size={22} color="var(--accent)" />
-              <h1 style={{ fontSize: 23, margin: 0 }}>Получи план от ИИ</h1>
+              <h1 style={{ fontSize: 23, margin: 0 }}>Собираем план</h1>
             </div>
-            <p className="muted" style={{ marginTop: 6, marginBottom: 18 }}>Скопируй готовый промт → вставь в ChatGPT/DeepSeek → верни ответ сюда.</p>
+            <p className="muted" style={{ marginTop: 6, marginBottom: 18 }}>
+              Выбери стратегию — план соберётся здесь же, за секунду. Если хочешь план от внешнего
+              ИИ или у тебя уже есть свой, это ниже.
+            </p>
             <PlanImporter onDone={() => store.finishOnboarding()} />
             <div className="divider" />
-            <button className="btn btn-ghost" onClick={() => setStep('questions')}><ArrowLeft size={16} /> Назад</button>
+            <button className="btn btn-ghost" onClick={() => setStep(aiReady(store.data.config) ? 'questions' : 'setup')}><ArrowLeft size={16} /> Назад</button>
           </div>
         )}
       </div>

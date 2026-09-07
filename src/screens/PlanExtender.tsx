@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store'
+import { countOf } from '../lib/plural'
 import { extendPlan, editPlan } from '../lib/ai'
 import { humanError } from '../lib/api'
 import { Wand2, RefreshCw, Shuffle } from 'lucide-react'
@@ -40,7 +41,7 @@ export default function PlanExtender({ onDone, initialWish }: { onDone: () => vo
         const kept = blocks.reduce((s, b) => s + b.lessons.filter((l) => l.done).length, 0)
         store.setPlanBlocks(blocks)
         store.ensureSubjectSetup([...new Set(blocks.map((b) => b.subjectId))])
-        setResultMsg(`План переделан: теперь ${n} занятий${kept ? `, выполненные сохранены (${kept})` : ''}. Раскладка по дням началась заново с сегодня.`)
+        setResultMsg(`План переделан: теперь ${countOf(n, ['занятие', 'занятия', 'занятий'])}${kept ? `, выполненные сохранены (${kept})` : ''}. Раскладка по дням началась заново с сегодня.`)
       }
       setWish('')
       setBusy('')
