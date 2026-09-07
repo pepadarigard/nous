@@ -80,6 +80,29 @@ export const useStore = create<Store>((set, get) => {
     d.progress.push({ id: uid('pr_'), at: new Date().toISOString(), ...e })
   }
 
+  /**
+   * Чистка банка. Генератор может добавлять задания бесконечно, а состояние
+   * целиком сериализуется при каждом сохранении: 4800 заданий — это уже 1,8 МБ,
+   * и в браузере (лимит ~5 МБ) банк рано или поздно перестал бы сохраняться.
+   *
+   * Выбрасывать можно только СГЕНЕРИРОВАННЫЕ и ни разу не решённые задания: их
+   * ничего не стоит создать заново. Всё, что ученик принёс сам, и всё, по чему
+   * есть попытки (на них держится интервальное повторение), остаётся навсегда.
+   */
+  const pruneQuestions = (d: AppData, keepFresh = 400) => {
+    const qs = d.questions ?? []
+    if (qs.length <= keepFresh) return
+    const answered = new Set((d.attempts ?? []).map((a) => a.questionId))
+    const keep: Question[] = []
+    const spare: Question[] = []
+    for (const q of qs) {
+      if (q.origin !== 'generated' || answered.has(q.id)) keep.push(q)
+      else spare.push(q)
+    }
+    // Из нерешённых оставляем самые свежие — с ними ученик и работает сейчас.
+    d.questions = [...keep, ...spare.slice(-keepFresh)]
+  }
+
   return {
     loaded: false,
     data: emptyData(),
@@ -217,6 +240,7 @@ export const useStore = create<Store>((set, get) => {
       commit((d) => {
         if (!d.questions) d.questions = []
         d.questions.push(...qs)
+        pruneQuestions(d)
         return d
       }),
     updateQuestion: (id, patch) =>
@@ -404,7 +428,7 @@ export const useStore = create<Store>((set, get) => {
       commit((d) => {
         const next = { ...d, onboarded: true }
         if (!(d.questions ?? []).length) {
-          const fresh = generateStarterSet(d.subjects, 8)
+          const fresh = generateStarterSet(d.subjects, 8, Math.random, new Set((d.questions ?? []).map((q) => q.text)))
           if (fresh.length) next.questions = fresh
         }
         return next

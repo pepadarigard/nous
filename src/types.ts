@@ -71,7 +71,10 @@ export interface Material {
 }
 
 /** Откуда взялось задание. */
-export type QuestionOrigin = 'manual' | 'import' | 'material' | 'ai'
+// 'generated' стоит особняком: такое задание собрано самим приложением и его можно
+// пересоздать в любой момент. Поэтому нерешённые генерированные задания разрешено
+// выбрасывать при чистке — в отличие от того, что ученик принёс сам.
+export type QuestionOrigin = 'manual' | 'import' | 'material' | 'ai' | 'generated'
 
 /** Задание в личном банке. */
 export interface Question {

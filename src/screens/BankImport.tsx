@@ -344,7 +344,8 @@ function FromMaterial({ onBack, onDone }: { onBack: () => void; onDone: () => vo
 /**
  * Стартовые задания. Нужны, чтобы тренажёр, интервальное повторение и балл
  * работали сразу после установки, а не после того, как ученик где-то раздобудет
- * свой банк. Задания оригинальные, ответы вычислены генератором — см. seedBank.ts.
+ * свой банк. Задания собирает генератор (lib/taskgen.ts): ответ считается из тех же
+ * чисел, что попали в условие, поэтому он верен по построению.
  */
 function SeedCard({ onDone }: { onDone: () => void }) {
   const data = useStore((s) => s.data)
@@ -356,7 +357,7 @@ function SeedCard({ onDone }: { onDone: () => void }) {
   const numbers = subjects.reduce((n, sid) => n + (cov[sid]?.length ?? 0), 0)
 
   function load() {
-    const fresh = generateStarterSet(subjects, 10)
+    const fresh = generateStarterSet(subjects, 10, Math.random, new Set((data.questions ?? []).map((q) => q.text)))
     if (!fresh.length) return
     addQuestions(fresh)
     setAdded(fresh.length)

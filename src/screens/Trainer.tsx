@@ -170,9 +170,15 @@ function TrainTab({
   function addMore(count = 10) {
     const subjects = subject !== 'all' ? [subject] : data.subjects.length ? data.subjects : ['russian']
     const fresh: Question[] = []
+    // Что уже лежит в банке — иначе повторное нажатие возвращало бы те же задания.
+    const known = new Set(questions.map((q) => q.text))
     for (const sid of subjects) {
       const nos = taskNo !== 'all' ? (canGenerate(sid, taskNo) ? [taskNo] : []) : generatedNumbers(sid)
-      for (const no of nos) fresh.push(...generateTasks(sid, no, taskNo !== 'all' ? count : Math.max(2, Math.round(count / nos.length))))
+      for (const no of nos) {
+        const made = generateTasks(sid, no, taskNo !== 'all' ? count : Math.max(2, Math.round(count / nos.length)), Math.random, known)
+        for (const q of made) known.add(q.text)
+        fresh.push(...made)
+      }
     }
     if (!fresh.length) return
     addQuestions(fresh)
