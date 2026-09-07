@@ -5,6 +5,7 @@ import { SUBJECTS, subjectById } from '../data/subjects'
 import type { Attempt, Question } from '../types'
 import { isCorrect, taskStats, trainingQueue } from '../lib/bank'
 import { dueForReview } from '../lib/review'
+import { canGenerate, generateTasks, generatedNumbers } from '../lib/taskgen'
 import { todayISO } from '../lib/schedule'
 import { countOf } from '../lib/plural'
 import BankImport from './BankImport'
@@ -123,7 +124,9 @@ function TrainTab({
 }) {
   const data = useStore((s) => s.data)
   const recordAttempt = useStore((s) => s.recordAttempt)
+  const addQuestions = useStore((s) => s.addQuestions)
   const attempts = data.attempts ?? NO_ATTEMPTS
+  const [added, setAdded] = useState(0)
 
   const [subject, setSubject] = useState(initialSubject)
   const [taskNo, setTaskNo] = useState<number | 'all'>(initialTaskNo)
@@ -160,6 +163,27 @@ function TrainTab({
     const list = subject === 'all' ? questions : questions.filter((q) => q.subjectId === subject)
     return [...new Set(list.map((q) => q.taskNo).filter((x): x is number => !!x))].sort((a, b) => a - b)
   }, [questions, subject])
+
+  // Задания генерируются, а не берутся из готового списка, поэтому кончиться не могут.
+  // Догенерируем ровно под текущий фильтр: выбран номер — по нему, выбран предмет —
+  // по всем его номерам, ничего не выбрано — по всем предметам ученика.
+  function addMore(count = 10) {
+    const subjects = subject !== 'all' ? [subject] : data.subjects.length ? data.subjects : ['russian']
+    const fresh: Question[] = []
+    for (const sid of subjects) {
+      const nos = taskNo !== 'all' ? (canGenerate(sid, taskNo) ? [taskNo] : []) : generatedNumbers(sid)
+      for (const no of nos) fresh.push(...generateTasks(sid, no, taskNo !== 'all' ? count : Math.max(2, Math.round(count / nos.length))))
+    }
+    if (!fresh.length) return
+    addQuestions(fresh)
+    setAdded(fresh.length)
+    window.setTimeout(() => setAdded(0), 2500)
+  }
+
+  const canAddMore =
+    (subject !== 'all' ? [subject] : data.subjects.length ? data.subjects : ['russian']).some((sid) =>
+      taskNo !== 'all' ? canGenerate(sid, taskNo) : generatedNumbers(sid).length > 0,
+    )
 
   function start() {
     // В повторении очередь уже выстроена по срочности — перемешивать её нельзя.
@@ -324,9 +348,21 @@ function TrainTab({
           только на повторение сегодня{dueIds.size > 0 && <> — {dueIds.size}</>}
         </span>
       </label>
-      <div className="row">
-        <span className="small muted">подходит заданий: {pool.length}</span>
+      <div className="row wrap" style={{ gap: 10 }}>
+        <span className="small muted">
+          подходит заданий: {pool.length}
+          {added > 0 && <span style={{ color: 'var(--success)' }}> · добавлено {added} новых</span>}
+        </span>
         <div className="spacer" />
+        {canAddMore && (
+          <button
+            className="btn"
+            onClick={() => addMore()}
+            title="Задания собираются на месте: числа каждый раз новые, поэтому они не кончаются и их нельзя запомнить"
+          >
+            <Plus size={15} /> Ещё задания
+          </button>
+        )}
         <button className="btn btn-primary btn-lg" disabled={!pool.length} onClick={start}><Play size={16} /> Начать</button>
       </div>
       <p className="small muted" style={{ marginBottom: 0, marginTop: 12 }}>

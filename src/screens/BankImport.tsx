@@ -6,7 +6,7 @@ import { extractQuestions, FIELD_LABEL, guessMapping, jsonToTable, parseTable, t
 import { decodeText } from '../lib/extract'
 import { loadMaterialText, uid } from '../lib/api'
 import { countOf } from '../lib/plural'
-import { SEED_BANK } from '../data/seedBank'
+import { generateStarterSet, generatorCoverage } from '../lib/taskgen'
 import { FileUp, Library, Plus, Check, X, Loader2, ClipboardPaste, Sparkles } from 'lucide-react'
 
 type Mode = 'menu' | 'file' | 'paste' | 'material' | 'manual'
@@ -352,44 +352,32 @@ function SeedCard({ onDone }: { onDone: () => void }) {
   const [added, setAdded] = useState(0)
 
   const subjects = data.subjects.length ? data.subjects : ['russian']
-  const have = new Set((data.questions ?? []).map((q) => q.text))
-  // Сравниваем по тексту, а не по id: id при добавлении генерируется заново,
-  // и повторное нажатие иначе наплодило бы дубли.
-  const fresh = SEED_BANK.filter((q) => subjects.includes(q.subjectId) && !have.has(q.text))
+  const cov = generatorCoverage()
+  const numbers = subjects.reduce((n, sid) => n + (cov[sid]?.length ?? 0), 0)
 
   function load() {
+    const fresh = generateStarterSet(subjects, 10)
     if (!fresh.length) return
-    addQuestions(
-      fresh.map((q) => ({
-        id: uid('q_'),
-        subjectId: q.subjectId,
-        taskNo: q.taskNo,
-        topic: q.topic,
-        text: q.text,
-        answer: q.answer,
-        origin: 'import' as const,
-        createdAt: new Date().toISOString(),
-      })),
-    )
+    addQuestions(fresh)
     setAdded(fresh.length)
     setTimeout(onDone, 900)
   }
 
   return (
-    <button className="pick-card" onClick={load} disabled={!fresh.length}>
+    <button className="pick-card" onClick={load} disabled={!numbers}>
       <Sparkles size={20} color="var(--accent)" />
       <div style={{ textAlign: 'left' }}>
-        <b>Готовые задания</b>
+        <b>Сгенерировать задания</b>
         <div className="small muted">
           {added > 0 ? (
             <>Добавлено {countOf(added, ['задание', 'задания', 'заданий'])} ✓</>
-          ) : fresh.length ? (
+          ) : numbers ? (
             <>
-              {countOf(fresh.length, ['задание', 'задания', 'заданий'])} по твоим предметам, уже с
-              ответами — чтобы было что решать прямо сейчас.
+              Соберу свежие задания по {countOf(numbers, ['номеру', 'номерам', 'номерам'])} твоих предметов — с
+              ответами и разбором. Числа каждый раз новые, поэтому запомнить их нельзя.
             </>
           ) : (
-            <>Все стартовые задания по твоим предметам уже в банке.</>
+            <>По твоим предметам генерация пока не поддерживается.</>
           )}
         </div>
       </div>
