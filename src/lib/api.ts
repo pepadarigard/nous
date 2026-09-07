@@ -1,7 +1,7 @@
 // Слой доступа к платформе. Работает и в Tauri (боевое .exe), и в браузере (для разработки).
 // В Tauri — вызовы Rust-команд; в браузере — localStorage + прямой fetch/файловый input.
 
-import type { AppData, Provider } from '../types'
+import type { AppData, Provider, Question } from '../types'
 import { GITHUB_MODELS, OR_FALLBACK_MODELS, PROVIDERS, normProvider } from './providers'
 
 export const isTauri =
@@ -16,28 +16,64 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 const STATE_KEY = 'ege_planner_state_v1'
 
 /** Загрузить всё состояние приложения. */
+/**
+ * Банк заданий лежит ОТДЕЛЬНО от остального состояния.
+ *
+ * Загрузка с Решу ЕГЭ даёт тысячи заданий и мегабайты текста, а состояние
+ * переписывается при каждом действии ученика — вплоть до отметки занятия.
+ * Держать банк внутри значило бы гонять эти мегабайты по кругу без нужды.
+ * Банк меняется редко, поэтому у него свой файл и своя запись по требованию.
+ */
+const BANK_KEY = 'ege_planner_bank_v1'
+
 export async function loadState(): Promise<AppData | null> {
   try {
+    let data: AppData | null = null
     if (isTauri) {
       const s = await invoke<string | null>('load_state')
-      return s ? (JSON.parse(s) as AppData) : null
+      data = s ? (JSON.parse(s) as AppData) : null
+    } else {
+      const s = localStorage.getItem(STATE_KEY)
+      data = s ? (JSON.parse(s) as AppData) : null
     }
-    const s = localStorage.getItem(STATE_KEY)
-    return s ? (JSON.parse(s) as AppData) : null
+    if (!data) return null
+    // Банк подмешиваем обратно. Пустой файл банка не должен затирать старые
+    // задания, которые ещё лежат внутри state.json с прошлых версий.
+    const bank = await loadBank()
+    if (bank?.length) data.questions = bank
+    return data
   } catch (e) {
     console.error('loadState error', e)
     return null
   }
 }
 
-/** Сохранить всё состояние приложения. */
-export async function saveState(data: AppData): Promise<void> {
-  const json = JSON.stringify(data)
+async function loadBank(): Promise<Question[] | null> {
+  try {
+    const s = isTauri
+      ? await invoke<string | null>('load_bank')
+      : localStorage.getItem(BANK_KEY)
+    return s ? (JSON.parse(s) as Question[]) : null
+  } catch (e) {
+    console.error('loadBank error', e)
+    return null
+  }
+}
+
+/**
+ * Сохранить состояние. `bankChanged` — переписывать ли файл банка: без него
+ * каждое нажатие тащило бы на диск весь банк заданий.
+ */
+export async function saveState(data: AppData, bankChanged = true): Promise<void> {
+  const { questions, ...rest } = data
+  const json = JSON.stringify(rest)
   if (isTauri) {
     await invoke('save_state', { data: json })
+    if (bankChanged) await invoke('save_bank', { data: JSON.stringify(questions ?? []) })
     return
   }
   localStorage.setItem(STATE_KEY, json)
+  if (bankChanged) localStorage.setItem(BANK_KEY, JSON.stringify(questions ?? []))
 }
 
 export interface GroqBody {

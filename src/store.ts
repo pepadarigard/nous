@@ -81,8 +81,8 @@ export const useStore = create<Store>((set, get) => {
    * следующем запуске всё сделанное после сбоя исчезало. Молча терять работу
    * нельзя — про это надо сказать сразу.
    */
-  const persist = (next: AppData) => {
-    saveState(next)
+  const persist = (next: AppData, bankChanged = true) => {
+    saveState(next, bankChanged)
       .then(() => {
         if (get().saveError) set({ saveError: '' })
       })
@@ -92,10 +92,24 @@ export const useStore = create<Store>((set, get) => {
       })
   }
 
+  /**
+   * Изменить состояние и сохранить.
+   *
+   * Банк заданий из копирования ИСКЛЮЧЁН намеренно. Полная загрузка с Решу ЕГЭ —
+   * это тысячи заданий и мегабайты; structuredClone всего состояния на каждое
+   * нажатие клонировал бы их заново, и приложение начало бы заметно подтормаживать
+   * на любом действии. Поэтому массив заданий переносится по ссылке, а изменяющие
+   * его действия обязаны СОЗДАВАТЬ НОВЫЙ массив, а не править старый на месте.
+   * По смене ссылки же видно, надо ли перезаписывать файл банка.
+   */
   const commit = (mut: (d: AppData) => AppData) => {
-    const next = mut(structuredClone(get().data))
+    const cur = get().data
+    const kept = cur.questions ?? []
+    const draft = structuredClone({ ...cur, questions: [] as Question[] })
+    draft.questions = kept
+    const next = mut(draft)
     set({ data: next })
-    persist(next)
+    persist(next, next.questions !== kept)
   }
   const pushProgress = (d: AppData, e: Omit<ProgressEvent, 'id' | 'at'>) => {
     d.progress.push({ id: uid('pr_'), at: new Date().toISOString(), ...e })
@@ -138,6 +152,10 @@ export const useStore = create<Store>((set, get) => {
       const base = emptyData()
       const data = saved ? { ...base, ...saved, config: { ...base.config, ...saved.config } } : base
       set({ data, loaded: true })
+      // Переезд со старой раскладки: раньше задания лежали внутри state.json.
+      // Первая же обычная запись сохраняет состояние БЕЗ них, и без этой строчки
+      // банк старого пользователя молча исчез бы. Пишем его сразу и целиком.
+      if (data.questions?.length) persist(data, true)
     },
     setPlanStatus: (s) => set({ planStatus: s }),
 
@@ -260,15 +278,13 @@ export const useStore = create<Store>((set, get) => {
 
     addQuestions: (qs) =>
       commit((d) => {
-        if (!d.questions) d.questions = []
-        d.questions.push(...qs)
+        d.questions = [...(d.questions ?? []), ...qs]
         pruneQuestions(d)
         return d
       }),
     updateQuestion: (id, patch) =>
       commit((d) => {
-        const q = d.questions?.find((x) => x.id === id)
-        if (q) Object.assign(q, patch)
+        d.questions = (d.questions ?? []).map((q) => (q.id === id ? { ...q, ...patch } : q))
         return d
       }),
     removeQuestion: (id) =>

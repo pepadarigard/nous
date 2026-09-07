@@ -2300,3 +2300,14 @@ label.field > span {
   line-height: 1.4;
 }
 .save-warn .small { opacity: 0.85; margin-top: 2px; }
+
+/* Чертежи к заданию: держим в разумной ширине, на светлом фоне — исходники
+   рассчитаны на белую бумагу и на тёмной теме иначе сливаются. */
+.task-figs { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.task-figs img {
+  max-width: min(100%, 460px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+}

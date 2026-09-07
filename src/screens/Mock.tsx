@@ -17,6 +17,7 @@ import { SCORING, taskPoints, toTestScore } from '../data/scoring'
 import { isCorrect } from '../lib/bank'
 import { countOf, plural } from '../lib/plural'
 import { Timer, Play, Flag, CheckCircle2, XCircle, MinusCircle } from 'lucide-react'
+import TaskFigures from '../ui/TaskFigures'
 
 type Phase = 'setup' | 'running' | 'done'
 
@@ -279,6 +280,7 @@ export default function Mock() {
               </span>
             </div>
             <div style={{ marginBottom: 8, whiteSpace: 'pre-wrap' }}>{s.question.text}</div>
+            <TaskFigures images={s.question.images} />
             <input
               className="input"
               placeholder="ответ"

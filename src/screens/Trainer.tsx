@@ -13,6 +13,7 @@ import BankImport from './BankImport'
 import SolutionCheck from './SolutionCheck'
 import Mock from './Mock'
 import Modal from '../ui/Modal'
+import TaskFigures from '../ui/TaskFigures'
 import { Play, Plus, BarChart3, Trash2, Check, X, RotateCcw, ListChecks, Lightbulb, ScrollText, Timer } from 'lucide-react'
 
 type Tab = 'train' | 'check' | 'mock' | 'bank' | 'stats'
@@ -266,6 +267,7 @@ function TrainTab({
         </div>
 
         <div className="q-text">{q.text}</div>
+        <TaskFigures images={q.images} />
         {q.options && q.options.length > 0 && (
           <ul className="small" style={{ marginTop: 8 }}>
             {q.options.map((o, i) => <li key={i}>{o}</li>)}

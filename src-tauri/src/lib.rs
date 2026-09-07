@@ -193,6 +193,95 @@ async fn llm_stream(
     Ok(full)
 }
 
+/// Файл банка заданий — отдельно от состояния.
+///
+/// Полная загрузка с Решу ЕГЭ — это тысячи заданий и мегабайты. Держать их в
+/// state.json значит переписывать эти мегабайты при каждом ответе на задание.
+/// Банк меняется редко, состояние — постоянно, поэтому файла два.
+fn bank_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("bank.json"))
+}
+
+#[tauri::command]
+fn load_bank(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let path = bank_path(&app)?;
+    Ok(fs::read_to_string(&path).ok())
+}
+
+#[tauri::command]
+fn save_bank(app: tauri::AppHandle, data: String) -> Result<(), String> {
+    let path = bank_path(&app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    // Пишем через временный файл: обрыв записи не должен превращать банк в мусор.
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, data).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+/// Разрешённые адреса банка заданий. Только Решу ЕГЭ и его хранилище картинок:
+/// команда ходит в сеть без ключа, и открывать её на произвольный адрес нельзя.
+fn allowed_bank(url: &str) -> bool {
+    const HOSTS: [&str; 6] = [
+        "https://rus-ege.sdamgia.ru/",
+        "https://math-ege.sdamgia.ru/",
+        "https://inf-ege.sdamgia.ru/",
+        "https://phys-ege.sdamgia.ru/",
+        "https://ege.sdamgia.ru/",
+        "https://sdamgia.ru/",
+    ];
+    HOSTS.iter().any(|h| url.starts_with(h))
+}
+
+/// Страница банка заданий как текст. Ходит только по адресам из allowed_bank.
+#[tauri::command]
+async fn bank_get(url: String) -> Result<String, String> {
+    if !allowed_bank(&url) {
+        return Err("Недопустимый адрес банка заданий".into());
+    }
+    let resp = http()
+        .get(&url)
+        .header("User-Agent", "Nous/0.3 (подготовка к ЕГЭ; личное использование)")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Сайт ответил {}", resp.status().as_u16()));
+    }
+    resp.text().await.map_err(|e| e.to_string())
+}
+
+/// Картинка-чертёж как base64. Без неё геометрическое задание нерешаемо, поэтому
+/// чертежи кладём рядом с заданием и дальше показываем офлайн.
+#[tauri::command]
+async fn bank_image(url: String) -> Result<String, String> {
+    if !allowed_bank(&url) {
+        return Err("Недопустимый адрес картинки".into());
+    }
+    let resp = http()
+        .get(&url)
+        .header("User-Agent", "Nous/0.3 (подготовка к ЕГЭ; личное использование)")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Сайт ответил {}", resp.status().as_u16()));
+    }
+    let kind = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/png")
+        .to_string();
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    // Больше двух мегабайт чертежей не бывает — защита от случайной тяжёлой ссылки.
+    if bytes.len() > 2 * 1024 * 1024 {
+        return Err("Слишком большая картинка".into());
+    }
+    Ok(format!("data:{};base64,{}", kind, B64.encode(&bytes)))
+}
+
 /// GET с авторизацией к провайдеру (список моделей, проверка ключа).
 #[tauri::command]
 async fn llm_get(api_key: String, url: String) -> Result<String, String> {
@@ -347,6 +436,10 @@ pub fn run() {
             llm_request,
             llm_stream,
             llm_get,
+            load_bank,
+            save_bank,
+            bank_get,
+            bank_image,
             github_latest,
             export_state,
             reveal_path,

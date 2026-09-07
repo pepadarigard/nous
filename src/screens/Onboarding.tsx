@@ -8,14 +8,15 @@ import { ONBOARDING_PROVIDERS, PROVIDERS, PROVIDER_ORDER, isLocal, keyOf, keyPat
 import type { Provider } from '../types'
 import { EGE_YEAR, EXAM_DATE_DEFAULT } from '../data/ege2027'
 import PlanImporter from './PlanImporter'
-import { Check, KeyRound, ArrowRight, ArrowLeft, Target, Sparkles } from 'lucide-react'
+import BankDownload from './BankDownload'
+import { Check, KeyRound, ArrowRight, ArrowLeft, Target, Sparkles, Download } from 'lucide-react'
 
-type Step = 'welcome' | 'setup' | 'subjects' | 'goals' | 'schedule' | 'questions' | 'import'
+type Step = 'welcome' | 'setup' | 'subjects' | 'goals' | 'schedule' | 'questions' | 'import' | 'bank'
 // Порядок не случайный: сначала приложение узнаёт про УЧЕНИКА и собирает план,
 // и только потом предлагает ИИ. Раньше настройка ИИ была первым экраном — человек
 // видел просьбу ввести API-ключ раньше, чем хоть что-то полезное, и приложение
 // выглядело надстройкой над чужой моделью, хотя работает целиком без неё.
-const STEPS: Step[] = ['welcome', 'subjects', 'goals', 'schedule', 'setup', 'questions', 'import']
+const STEPS: Step[] = ['welcome', 'subjects', 'goals', 'schedule', 'setup', 'questions', 'import', 'bank']
 
 export default function Onboarding() {
   const store = useStore()
@@ -424,11 +425,33 @@ export default function Onboarding() {
               Выбери стратегию — план соберётся здесь же, за секунду. Если хочешь план от внешнего
               ИИ или у тебя уже есть свой, это ниже.
             </p>
-            <PlanImporter onDone={() => store.finishOnboarding()} />
+            <PlanImporter onDone={() => setStep('bank')} />
             <div className="divider" />
             <button className="btn btn-ghost" onClick={() => setStep(aiReady(store.data.config) ? 'questions' : 'setup')}><ArrowLeft size={16} /> Назад</button>
           </div>
         )}
+
+        {step === 'bank' && (
+          <div className="fade-in">
+            <div className="row" style={{ gap: 10, marginBottom: 2 }}>
+              <Download size={22} color="var(--accent)" />
+              <h1 style={{ fontSize: 23, margin: 0 }}>Загружаем задания</h1>
+            </div>
+            <p className="muted" style={{ marginTop: 6, marginBottom: 16 }}>
+              Последний шаг. Задания приложение уже умеет собирать само, но живой банк с Решу ЕГЭ
+              лучше: настоящие формулировки, чертежи и разборы. Можно пропустить и сделать это
+              потом в «Тренажёре».
+            </p>
+            <BankDownload onDone={() => store.finishOnboarding()} />
+            <div className="divider" />
+            <div className="row">
+              <button className="btn btn-ghost" onClick={() => setStep('import')}><ArrowLeft size={16} /> Назад</button>
+              <div className="spacer" />
+              <button className="btn" onClick={() => store.finishOnboarding()}>Пропустить <ArrowRight size={17} /></button>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   )

@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
+import BankDownload from './BankDownload'
 import { SUBJECTS } from '../data/subjects'
 import type { Question } from '../types'
 import { extractQuestions, FIELD_LABEL, guessMapping, jsonToTable, parseTable, textParagraphs, type DraftQuestion, type FieldName } from '../lib/bank'
@@ -7,9 +8,9 @@ import { decodeText } from '../lib/extract'
 import { loadMaterialText, uid } from '../lib/api'
 import { countOf } from '../lib/plural'
 import { generateStarterSet, generatorCoverage } from '../lib/taskgen'
-import { FileUp, Library, Plus, Check, X, Loader2, ClipboardPaste, Sparkles } from 'lucide-react'
+import { FileUp, Library, Plus, Check, X, Loader2, ClipboardPaste, Sparkles, Download } from 'lucide-react'
 
-type Mode = 'menu' | 'file' | 'paste' | 'material' | 'manual'
+type Mode = 'download' | 'menu' | 'file' | 'paste' | 'material' | 'manual'
 
 /**
  * Пополнение банка заданий БЕЗ ИИ:
@@ -21,6 +22,7 @@ type Mode = 'menu' | 'file' | 'paste' | 'material' | 'manual'
 export default function BankImport({ onDone }: { onDone: () => void }) {
   const [mode, setMode] = useState<Mode>('menu')
 
+  if (mode === 'download') return <DownloadPane onBack={() => setMode('menu')} onDone={onDone} />
   if (mode === 'file') return <FromFile onBack={() => setMode('menu')} onDone={onDone} />
   if (mode === 'paste') return <FromPaste onBack={() => setMode('menu')} onDone={onDone} />
   if (mode === 'material') return <FromMaterial onBack={() => setMode('menu')} onDone={onDone} />
@@ -29,8 +31,17 @@ export default function BankImport({ onDone }: { onDone: () => void }) {
   return (
     <div className="grid" style={{ gap: 12 }}>
       <p className="small muted" style={{ margin: 0 }}>
-        Всё это работает без интернета и без ИИ — задания остаются на твоём компьютере.
+        Задания остаются на твоём компьютере. Всё, кроме загрузки с Решу ЕГЭ, работает и без интернета.
       </p>
+      <button className="pick-card" onClick={() => setMode('download')}>
+        <Download size={20} color="var(--accent)" />
+        <div>
+          <b>Скачать с Решу ЕГЭ</b>
+          <div className="small muted">
+            Задания по каждому номеру с ответами, разборами и чертежами — прямо в банк.
+          </div>
+        </div>
+      </button>
       <button className="pick-card" onClick={() => setMode('file')}>
         <FileUp size={20} color="var(--accent)" />
         <div>
@@ -623,6 +634,17 @@ function Manual({ onBack, onDone }: { onBack: () => void; onDone: () => void }) 
         <button className="btn btn-ghost" onClick={onBack}><X size={15} /> Отмена</button>
         <button className="btn btn-primary" disabled={!text.trim()} onClick={save}>Добавить</button>
       </div>
+    </div>
+  )
+}
+
+/** Загрузка банка с Решу ЕГЭ — отдельной страницей, чтобы поместился прогресс. */
+function DownloadPane({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+  return (
+    <div>
+      <button className="btn btn-ghost btn-sm" onClick={onBack}>← Назад</button>
+      <h3 style={{ marginTop: 12 }}>Скачать задания с Решу ЕГЭ</h3>
+      <BankDownload onDone={onDone} />
     </div>
   )
 }
