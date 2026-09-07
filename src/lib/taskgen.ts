@@ -15,6 +15,7 @@
 
 import type { Question } from '../types'
 import { PARONYMS, PLEONASM, FORMS } from '../data/norms'
+import { ROOT_WORDS, PREFIX_WORDS, ENDING_WORDS, type GapWord, type RootKind } from '../data/spelling'
 import { uid } from './api'
 
 export interface GeneratedTask {
@@ -31,6 +32,15 @@ export type Rnd = () => number
 
 const int = (r: Rnd, a: number, b: number) => a + Math.floor(r() * (b - a + 1))
 const pick = <T,>(r: Rnd, a: readonly T[]): T => a[Math.floor(r() * a.length)]
+/** Перемешать копию. Порядок вариантов не должен намекать на ответ. */
+const shuffle = <T,>(r: Rnd, a: readonly T[]): T[] => {
+  const out = [...a]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1))
+    ;[out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
 /**
  * Число для показа ученику, с запятой вместо точки.
  *
@@ -922,6 +932,119 @@ const STRESS: readonly (readonly [string, string])[] = [
 ]
 
 
+/**
+ * Задания 10 и 12: пять рядов слов с пропусками, надо назвать ряды, где во всех
+ * словах пропущена ОДНА И ТА ЖЕ буква. Ответ — номера рядов подряд, как в бланке.
+ *
+ * Ряд-ответ собирается из слов с одинаковой буквой, ряд-обманка — из слов с
+ * разными. Поэтому ответ верен по построению: он вычисляется из тех же данных,
+ * из которых собран сам вопрос.
+ */
+function sameLetterRows(r: Rnd, words: readonly GapWord[], where: string) {
+  const byLetter = new Map<string, GapWord[]>()
+  for (const w of words) {
+    const list = byLetter.get(w[1])
+    if (list) list.push(w)
+    else byLetter.set(w[1], [w])
+  }
+  const letters = [...byLetter.keys()].filter((l) => (byLetter.get(l)?.length ?? 0) >= 2)
+  if (letters.length < 2) return null
+
+  const ROWS = 5
+  const rightCount = int(r, 2, 3)
+  const isRight = shuffle(r, [...Array(ROWS)].map((_, i) => i < rightCount))
+  const used = new Set<string>()
+  const take = (pool: GapWord[]): GapWord | null => {
+    const free = pool.filter((w) => !used.has(w[0]))
+    if (!free.length) return null
+    const w = pick(r, free)
+    used.add(w[0])
+    return w
+  }
+
+  const rows: { words: GapWord[]; right: boolean }[] = []
+  for (const right of isRight) {
+    if (right) {
+      const l = pick(r, letters)
+      const a = take(byLetter.get(l)!)
+      const b = take(byLetter.get(l)!)
+      if (!a || !b) return null
+      rows.push({ words: [a, b], right: true })
+    } else {
+      const shuffled = shuffle(r, letters)
+      const a = take(byLetter.get(shuffled[0])!)
+      const b = take(byLetter.get(shuffled[1])!)
+      if (!a || !b) return null
+      rows.push({ words: [a, b], right: false })
+    }
+  }
+
+  const answer = rows.map((row, i) => (row.right ? i + 1 : 0)).filter(Boolean).join('')
+  const body = rows.map((row, i) => `${i + 1}) ${row.words.map((w) => w[0]).join(', ')}`).join('\n')
+  const why = rows
+    .map((row, i) => {
+      const spelled = row.words.map((w) => w[0].replace('..', w[1].toUpperCase())).join(', ')
+      return `${i + 1}) ${spelled} — ${row.right ? 'буква одна и та же' : 'буквы разные'}`
+    })
+    .join('\n')
+  return {
+    text: `Укажите варианты ответов, в которых во всех словах одного ряда пропущена одна и та же буква (в ${where}). Запишите номера ответов подряд, без пробелов.\n\n${body}`,
+    answer,
+    solution: `${why}\n\nОтвет: ${answer}.`,
+  }
+}
+
+/**
+ * Задание 9: пять рядов по три слова, надо назвать ряды, где во ВСЕХ словах
+ * гласная в корне относится к одному типу — проверяемая, непроверяемая или
+ * чередующаяся. Тип каждого слова задан в данных, отсюда и ответ.
+ */
+function rowsByRoot(r: Rnd, kind: RootKind) {
+  const same = ROOT_WORDS.filter((w) => w[1] === kind)
+  const other = ROOT_WORDS.filter((w) => w[1] !== kind)
+  if (same.length < 12 || other.length < 5) return null
+
+  const ROWS = 5
+  const PER_ROW = 3
+  const rightCount = int(r, 1, 2)
+  const isRight = shuffle(r, [...Array(ROWS)].map((_, i) => i < rightCount))
+  const used = new Set<string>()
+  const take = (pool: readonly (readonly [string, RootKind, string])[]) => {
+    const free = pool.filter((w) => !used.has(w[0]))
+    if (!free.length) return null
+    const w = pick(r, free)
+    used.add(w[0])
+    return w
+  }
+
+  const rows: { words: (readonly [string, RootKind, string])[]; right: boolean }[] = []
+  for (const right of isRight) {
+    const words: (readonly [string, RootKind, string])[] = []
+    // В ряду-обманке ровно одно слово «не то»: искать его — и есть работа ученика.
+    const wrongAt = right ? -1 : int(r, 0, PER_ROW - 1)
+    for (let i = 0; i < PER_ROW; i++) {
+      const w = take(i === wrongAt ? other : same)
+      if (!w) return null
+      words.push(w)
+    }
+    rows.push({ words, right })
+  }
+
+  const answer = rows.map((row, i) => (row.right ? i + 1 : 0)).filter(Boolean).join('')
+  const body = rows.map((row, i) => `${i + 1}) ${row.words.map((w) => w[0]).join(', ')}`).join('\n')
+  const why = rows
+    .map((row, i) => {
+      const parts = row.words.map((w) => `${w[0]} — ${w[1]} (${w[2]})`).join('; ')
+      return `${i + 1}) ${parts}`
+    })
+    .join('\n')
+  return {
+    text: `Укажите варианты ответов, в которых во всех словах одного ряда пропущена безударная ${kind} гласная корня. Запишите номера ответов подряд, без пробелов.\n\n${body}`,
+    answer,
+    solution: `${why}\n\nПодходят ряды, где ВСЕ три слова нужного типа.\nОтвет: ${answer}.`,
+  }
+}
+
 /** Убрать случайные не-кириллические вставки из данных. */
 const ru = (s: string) => s.replace(/[^Ѐ-ӿ\s.,:;!?()«»—–-]/g, '').replace(/\s{2,}/g, ' ').trim()
 
@@ -970,6 +1093,22 @@ const RUSSIAN: Record<number, TaskSpec> = {
         }
       },
     ],
+  },
+  9: {
+    topic: 'Правописание корней',
+    families: [
+      (r) => rowsByRoot(r, 'проверяемая'),
+      (r) => rowsByRoot(r, 'чередующаяся'),
+      (r) => rowsByRoot(r, 'непроверяемая'),
+    ],
+  },
+  10: {
+    topic: 'Правописание приставок',
+    families: [(r) => sameLetterRows(r, PREFIX_WORDS, 'приставке')],
+  },
+  12: {
+    topic: 'Личные окончания глаголов и суффиксы причастий',
+    families: [(r) => sameLetterRows(r, ENDING_WORDS, 'окончании или суффиксе')],
   },
   7: {
     topic: 'Морфологические нормы',
