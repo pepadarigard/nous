@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nous — подготовка к ЕГЭ</title>
+<!--
+  Витрина для GitHub Pages. Отсюда две двери: живое приложение в браузере и
+  просмотр телефонной вёрстки с компьютера.
+
+  Браузерная версия — та же, что и в приложении, кроме двух вещей, которые
+  браузер не даёт: загрузки заданий с Решу ЕГЭ (её блокирует CORS) и работы с
+  файлами материалов. Всё остальное — план, тренажёр, повторение, балл —
+  работает, а данные лежат в браузере этого устройства.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh; box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 22px; padding: 40px 20px;
+    background: linear-gradient(160deg, #0b2a27, #10443d);
+    color: #eafaf7;
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    text-align: center;
+  }
+  .logo {
+    width: 62px; height: 62px; border-radius: 18px;
+    background: linear-gradient(135deg, #2dd4bf, #0d9488);
+    display: grid; place-items: center;
+    font-size: 32px; font-weight: 800; color: #06302b;
+  }
+  h1 { margin: 0; font-size: 28px; letter-spacing: -0.02em; }
+  p { margin: 0; max-width: 480px; opacity: 0.82; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+  a.btn {
+    display: inline-block; padding: 12px 22px; border-radius: 12px;
+    text-decoration: none; font-weight: 650;
+    background: #2dd4bf; color: #06302b;
+    border: 1px solid transparent;
+  }
+  a.btn.ghost { background: rgba(255,255,255,0.08); color: #eafaf7; border-color: rgba(255,255,255,0.18); }
+  small { opacity: 0.6; max-width: 480px; display: block; }
+</style>
+</head>
+<body>
+  <div class="logo">ν</div>
+  <h1>Nous</h1>
+  <p>Личный штаб подготовки к ЕГЭ: план по структуре экзамена, тренажёр с проверкой ответов,
+     интервальное повторение и честный балл по решённому.</p>
+  <div class="row">
+    <a class="btn" href="./app/">Открыть в браузере</a>
+    <a class="btn ghost" href="./app/phone.html">Посмотреть как на телефоне</a>
+    <a class="btn ghost" href="https://github.com/pepadarigard/nous">Исходники и установщик</a>
+  </div>
+  <small>В браузере не работают две вещи: загрузка заданий с Решу ЕГЭ (её блокирует сам браузер)
+     и свои файлы-материалы. Для них нужна версия для Windows.</small>
+</body>
+</html>
