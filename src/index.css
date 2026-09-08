@@ -2418,3 +2418,137 @@ label.field > span {
 @media (max-width: 640px) {
   .upd-banner { flex-wrap: wrap; }
 }
+
+/* ================= Телефон =================
+ *
+ * До этого блока в вёрстке было два медиазапроса на всё приложение, и на экране
+ * 375px боковая панель занимала 250 — две трети ширины, — а текст сжимался в
+ * колонку по одному слову. Шестьдесят шесть элементов вылезали за экран.
+ *
+ * Главное решение: боковая панель уезжает вниз и становится панелью вкладок,
+ * как в любом мобильном приложении. Прятать её в «бургер» хуже: разделов всего
+ * семь, они все нужны, и лишнее нажатие на каждый переход — это плохо.
+ */
+@media (max-width: 760px) {
+  .app {
+    grid-template-columns: 1fr;
+    /* dvh, а не vh: на телефоне адресная строка съезжает, и 100vh вылезает за экран. */
+    height: 100dvh;
+    grid-template-rows: 1fr auto;
+  }
+
+  /* Боковая панель → нижняя панель вкладок. */
+  .sidebar {
+    order: 2;
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: stretch;
+    gap: 0;
+    padding: 4px 2px calc(4px + env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(255, 255, 255, 0.09);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .sidebar::-webkit-scrollbar { display: none; }
+  /* Логотип, уровень и подпись внизу на телефоне только отнимают место —
+     уровень и так виден на «Прогрессе». */
+  .sidebar .brand,
+  .sidebar .side-level,
+  .sidebar-foot { display: none; }
+
+  .nav-item {
+    flex-direction: column;
+    gap: 3px;
+    padding: 7px 4px 5px;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-align: center;
+    min-width: 48px;
+    flex: 1 0 auto;
+    white-space: nowrap;
+  }
+  .nav-item svg { width: 21px; height: 21px; }
+  /* Полоска активного раздела сбоку не имеет смысла, когда панель горизонтальная. */
+  .nav-item.active::before {
+    left: 10px;
+    right: 10px;
+    top: -4px;
+    bottom: auto;
+    width: auto;
+    height: 3px;
+    border-radius: 0 0 4px 4px;
+  }
+
+  .main { padding: 18px 14px 28px; }
+  .page-head { margin-bottom: 16px; }
+  .page-head h1 { font-size: 21px; }
+
+  /* Любая многоколоночная сетка на телефоне — в одну колонку. Исключение ниже. */
+  .grid.cols-2,
+  .grid.cols-3,
+  .grid.cols-4 { grid-template-columns: 1fr; }
+  /* Достижения и предметы — плитками по две: они маленькие и их много. */
+  .ach-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .ach { min-width: 0; }
+
+  /* Календарь и полоса недели остаются на семь колонок — иначе неделя перестаёт
+     читаться как неделя, — но ужимаются. */
+  .week-strip { gap: 4px; }
+  .ws-day { padding: 8px 2px 7px; font-size: 12px; }
+  .cal-grid { gap: 3px; }
+
+  /* Вкладки тренажёра не влезают в ряд — пусть прокручиваются вбок. */
+  .seg {
+    overflow-x: auto;
+    scrollbar-width: none;
+    max-width: 100%;
+  }
+  .seg::-webkit-scrollbar { display: none; }
+  .seg-btn { white-space: nowrap; flex: 0 0 auto; }
+
+  /* Бланк ответа: 17 клеток по 30px не помещаются в 375px. Ужимаем клетку, а не
+     переносим строку — перенос посреди бланка сбивает счёт символов. */
+  .cells { gap: 2px; }
+  .cell { width: 18px; height: 32px; font-size: 14px; border-radius: 4px; }
+
+  /* Шапка плана. На широком экране это две колонки: слева счётчик дней, справа
+     кнопки. На телефоне колонки сжимались до нечитаемого — «ПУТЬ К ЕГЭ 2027»
+     переносилось по слову, а кнопки наезжали на текст. Ставим одна под другой. */
+  .plan-hero { flex-direction: column; align-items: stretch; gap: 14px; padding: 16px; }
+  .ph-right { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .ph-num { font-size: 36px; }
+  .ph-kicker { font-size: 10.5px; letter-spacing: 0.06em; }
+  .ph-btn { flex: 1 0 auto; }
+
+  /* Герой «Прогресса»: кольцо уровня, название и метрики. На телефоне три
+     колонки схлопывались так, что «до следующего уровня ещё 60 XP» шло по слову
+     в строку. Кольцо и подпись — в ряд сверху, метрики — под ними. */
+  .level-hero { flex-direction: column; align-items: stretch; gap: 16px; padding: 16px; }
+  .lh-mid { text-align: center; }
+  .lh-title { font-size: 24px; }
+  .lh-side { flex-direction: row; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+
+  /* Выбор предметов: двенадцать карточек в одну колонку — это тысяча пикселей
+     прокрутки на первом же экране. Ставим в две и убираем полное название:
+     «Матем. (проф)» и эмодзи хватает, чтобы узнать предмет. */
+  .onb-card { padding: 20px 14px; border-radius: 16px; }
+  .grid.cols-2:has(.subject-card) { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  /* min-width: 0 обязателен: без него колонка 1fr не сжимается уже своего
+     содержимого, и вторая колонка уезжала за край карточки. */
+  .subject-card { padding: 11px 9px; gap: 8px; min-width: 0; }
+  /* Переносить по буквам нельзя — выходило «Русск/ий» и «Инфор/матика».
+     Хватает того, что колонка сжимается, а шрифт чуть меньше. */
+  .subject-card > div { min-width: 0; font-size: 13.5px; line-height: 1.25; }
+  .subject-card .emoji { font-size: 19px; }
+  .subject-card .small.muted { display: none; }
+
+  .card { padding: 14px; }
+  .modal { width: 100%; max-width: 100%; border-radius: 14px 14px 0 0; }
+  .task-figs img { max-width: 100%; }
+}
+
+/* Совсем узкие экраны (старые телефоны, 360px и меньше). */
+@media (max-width: 380px) {
+  .cell { width: 16px; height: 30px; font-size: 13px; }
+  .nav-item { font-size: 9.5px; min-width: 44px; }
+}
