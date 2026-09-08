@@ -27,3 +27,10 @@ src-tauri/target/
 *.njsproj
 *.sln
 *.sw?
+
+# Android: сгенерированный проект и сборка. Пересоздаётся командой
+# `tauri android init`, поэтому в репозитории ему делать нечего.
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/build/
+src-tauri/gen/android/local.properties
