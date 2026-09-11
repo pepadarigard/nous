@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store'
 import { SUBJECTS } from '../data/subjects'
-import type { Lesson, PlanEvent, ScheduleRules, StudyPlan, SubjectSchedule } from '../types'
+import type { Lesson, PlanEvent, PlanStage, ScheduleRules, StudyPlan, SubjectSchedule } from '../types'
 import {
   addDaysISO,
   agendaByDate,
@@ -17,6 +17,7 @@ import {
 } from '../lib/schedule'
 import { useDragMove, type DragPayload } from '../lib/dragmove'
 import { countOf } from '../lib/plural'
+import { STAGE_HINT, STAGE_TITLE } from '../lib/offlinePlan'
 import { EGE_YEAR } from '../data/ege2027'
 import Modal from '../ui/Modal'
 import PlanImporter from './PlanImporter'
@@ -104,6 +105,8 @@ export default function PlanScreen() {
         onRefine={() => setRefineOpen(true)}
         onRules={() => setRulesOpen(true)}
       />
+
+      <StageBar plan={plan} />
 
       <div className="row wrap" style={{ margin: '18px 0', gap: 8 }}>
         <div className="seg">
@@ -264,6 +267,55 @@ function LessonRow({ item, onToggle, onOpen, onDragStart }: {
         {lesson.description && <div className="small muted" style={{ marginTop: 3 }}>{lesson.description}</div>}
       </div>
       <div className="tick" onClick={() => onToggle(block.id, lesson.id)}>{lesson.done && <Check size={15} color="#fff" />}</div>
+    </div>
+  )
+}
+
+/**
+ * Полоса этапов: где ты сейчас в подготовке.
+ *
+ * Без неё план — одна длинная лента до горизонта, по которой не понять, идёшь
+ * ли ты по графику. Этап отвечает на вопрос «чем я вообще сейчас занят»:
+ * разбираюсь, нарешиваю или уже прогоняю работу целиком.
+ *
+ * У планов от ИИ и у старых планов этапов нет — полоса тогда просто не
+ * показывается, а не выдумывает их задним числом.
+ */
+function StageBar({ plan }: { plan: StudyPlan }) {
+  const stages: PlanStage[] = ['prep', 'drill', 'run']
+  const rows = stages
+    .map((stage) => {
+      const lessons = plan.blocks.filter((b) => b.stage === stage).flatMap((b) => b.lessons)
+      return { stage, total: lessons.length, done: lessons.filter((l) => l.done).length }
+    })
+    .filter((r) => r.total > 0)
+  if (rows.length < 2) return null
+
+  // Текущий этап — первый незакрытый. Занятия следующего этапа в календаре
+  // стоят позже, поэтому «текущий» здесь совпадает с тем, что ученик реально делает.
+  const current = rows.find((r) => r.done < r.total)?.stage ?? rows[rows.length - 1].stage
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="row wrap" style={{ gap: 14 }}>
+        {rows.map((r) => {
+          const pct = Math.round((r.done / r.total) * 100)
+          const now = r.stage === current
+          return (
+            <div key={r.stage} style={{ flex: 1, minWidth: 170 }}>
+              <div className="row" style={{ gap: 8 }}>
+                <b style={{ color: now ? 'var(--accent-text)' : undefined }}>{STAGE_TITLE[r.stage]}</b>
+                <div className="spacer" />
+                <span className="small muted">{r.done}/{r.total}</span>
+              </div>
+              <div className="pbar" style={{ marginTop: 6 }}>
+                <span style={{ width: pct + '%', background: now ? 'var(--accent)' : 'var(--success)' }} />
+              </div>
+              {now && <div className="small muted" style={{ marginTop: 6 }}>{STAGE_HINT[r.stage]}</div>}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

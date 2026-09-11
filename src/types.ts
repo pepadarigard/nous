@@ -21,12 +21,24 @@ export interface Lesson {
   brief?: LessonBrief // теория и задания от ИИ, сохранённые в занятии
 }
 
+/**
+ * Этап подготовки.
+ *
+ * Нельзя весь год изучать новое и выйти на экзамен, ни разу не пройдя работу
+ * целиком под таймером, — и нельзя гонять пробники, ещё не разобравшись в
+ * темах. Поэтому у блока есть этап: разобраться, довести до автоматизма,
+ * пройти целиком. У планов от ИИ и у старых планов этапа нет — они считаются
+ * подготовкой.
+ */
+export type PlanStage = 'prep' | 'drill' | 'run'
+
 export interface Block {
   id: string
   subjectId: string
   title: string
   goal: string
   order: number
+  stage?: PlanStage
   lessons: Lesson[]
 }
 
