@@ -1,19 +1,22 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, CalendarDays, Library, Target, BookOpen, Stethoscope, TrendingUp, MessageCircle, Settings as Cog, Trophy, AlertTriangle } from 'lucide-react'
+import { LayoutDashboard, CalendarDays, Library, Target, BookOpen, TrendingUp, MessageCircle, Settings as Cog, Trophy, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store'
 import { computeStats } from '../lib/stats'
 import UpdateBanner from './UpdateBanner'
 
+// Подпись у пункта две: полная для бокового меню и короткая для нижней панели
+// на телефоне. Девять полных названий в 375 точек не помещаются, панель
+// начинает прокручиваться — а прокрутку внизу экрана человек просто не
+// замечает, и половина разделов для него исчезает.
 const nav = [
-  { to: '/', label: 'Главная', icon: LayoutDashboard, end: true },
-  { to: '/plan', label: 'План', icon: CalendarDays },
-  { to: '/materials', label: 'Материалы', icon: Library },
-  { to: '/trainer', label: 'Тренажёр', icon: Target },
-  { to: '/reference', label: 'Справочник', icon: BookOpen },
-  { to: '/diagnostic', label: 'Диагностика', icon: Stethoscope },
-  { to: '/progress', label: 'Прогресс', icon: TrendingUp },
-  { to: '/chat', label: 'Чат с ИИ', icon: MessageCircle },
-  { to: '/settings', label: 'Настройки', icon: Cog },
+  { to: '/', label: 'Главная', short: 'Главная', icon: LayoutDashboard, end: true },
+  { to: '/plan', label: 'План', short: 'План', icon: CalendarDays },
+  { to: '/materials', label: 'Материалы', short: 'Файлы', icon: Library },
+  { to: '/trainer', label: 'Тренажёр', short: 'Решать', icon: Target },
+  { to: '/reference', label: 'Справочник', short: 'Справка', icon: BookOpen },
+  { to: '/progress', label: 'Прогресс', short: 'Прогресс', icon: TrendingUp },
+  { to: '/chat', label: 'Чат с ИИ', short: 'Чат', icon: MessageCircle },
+  { to: '/settings', label: 'Настройки', short: 'Ещё', icon: Cog },
 ]
 
 export default function Layout() {
@@ -31,7 +34,8 @@ export default function Layout() {
         {nav.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <n.icon />
-            {n.label}
+            <span className="nav-full">{n.label}</span>
+            <span className="nav-short">{n.short}</span>
           </NavLink>
         ))}
         <NavLink to="/progress" className="side-level" title="Открыть прогресс">

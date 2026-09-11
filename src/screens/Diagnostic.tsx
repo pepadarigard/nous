@@ -108,16 +108,19 @@ export default function Diagnostic() {
   function answer(ok: boolean, score?: number, max?: number) {
     const step = steps?.[idx]
     if (!step) return
-    if (step.question) {
-      recordAttempt({
-        questionId: step.question.id,
-        subjectId: subject,
-        taskNo: step.taskNo,
-        answer: given.slice(0, 200),
-        correct: ok,
-        ...(score !== undefined ? { score, maxScore: max } : {}),
-      })
-    }
+    recordAttempt({
+      // У задания второй части своей карточки в банке может и не быть — мы её
+      // и не просили решать. Но замер записать обязаны, иначе срез покажет
+      // карту на экране и ничего не оставит расчёту «цены балла», ради
+      // которого его и проходили. Идентификатор тогда собираем из номера —
+      // так же, как это делает проверка развёрнутого ответа.
+      questionId: step.question?.id ?? 'free_' + subject + '_' + step.taskNo,
+      subjectId: subject,
+      taskNo: step.taskNo,
+      answer: given.slice(0, 200) || (step.part2 ? '(самооценка)' : ''),
+      correct: ok,
+      ...(score !== undefined ? { score, maxScore: max } : {}),
+    })
     setDone((d) => [...d, { taskNo: step.taskNo, ok, part2: step.part2 }])
     setGiven('')
     setIdx((i) => i + 1)
