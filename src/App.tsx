@@ -11,6 +11,8 @@ import PlanScreen from './screens/PlanScreen'
 import ProgressScreen from './screens/ProgressScreen'
 import Materials from './screens/Materials'
 import Trainer from './screens/Trainer'
+import Reference from './screens/Reference'
+import Diagnostic from './screens/Diagnostic'
 import Chat from './screens/Chat'
 import Settings from './screens/Settings'
 import Celebrations from './ui/Celebrations'
@@ -65,6 +67,8 @@ export default function App() {
             <Route path="progress" element={<ProgressScreen />} />
             <Route path="materials" element={<Materials />} />
             <Route path="trainer" element={<Trainer />} />
+            <Route path="reference" element={<Reference />} />
+            <Route path="diagnostic" element={<Diagnostic />} />
             <Route path="chat" element={<Chat />} />
             <Route path="settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, CalendarDays, Library, Target, TrendingUp, MessageCircle, Settings as Cog, Trophy, AlertTriangle } from 'lucide-react'
+import { LayoutDashboard, CalendarDays, Library, Target, BookOpen, Stethoscope, TrendingUp, MessageCircle, Settings as Cog, Trophy, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store'
 import { computeStats } from '../lib/stats'
 import UpdateBanner from './UpdateBanner'
@@ -9,6 +9,8 @@ const nav = [
   { to: '/plan', label: 'План', icon: CalendarDays },
   { to: '/materials', label: 'Материалы', icon: Library },
   { to: '/trainer', label: 'Тренажёр', icon: Target },
+  { to: '/reference', label: 'Справочник', icon: BookOpen },
+  { to: '/diagnostic', label: 'Диагностика', icon: Stethoscope },
   { to: '/progress', label: 'Прогресс', icon: TrendingUp },
   { to: '/chat', label: 'Чат с ИИ', icon: MessageCircle },
   { to: '/settings', label: 'Настройки', icon: Cog },

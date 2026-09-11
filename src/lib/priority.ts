@@ -25,7 +25,13 @@ import { EGE_TASKS, isPart2, taskSection } from '../data/egeTasks'
 /** Во сколько раз задание второй части дороже по времени, чем номер первой. */
 const PART2_EFFORT = 4
 
-/** Сколько попыток нужно, чтобы считать точность измеренной. */
+/**
+ * Со скольких попыток точность считается надёжной.
+ *
+ * Меньше — не повод молчать: диагностический срез даёт по одной попытке на
+ * номер, и это уже в разы лучше, чем ничего. Но такую строчку надо ПОДПИСАТЬ
+ * как грубую, иначе «берёшь 0%» по одному промаху выглядит приговором.
+ */
 export const ENOUGH_TRIES = 3
 
 export interface Priority {
@@ -42,6 +48,8 @@ export interface Priority {
   gap: number
   /** Баллы на единицу усилия — по этому и сортируем. */
   value: number
+  /** Попыток меньше надёжного минимума — цифра грубая, так и подписываем. */
+  rough: boolean
   part2: boolean
 }
 
@@ -68,7 +76,7 @@ export function priorities(attempts: Attempt[], subjectId: string): Priority[] {
   const out: Priority[] = []
   for (const t of tasks) {
     const st = tries.get(t.no)
-    if (!st || st.total < ENOUGH_TRIES) continue // не мерили — не гадаем
+    if (!st) continue // ни одной попытки — гадать не о чем
     const points = taskPoints(subjectId, t.no)
     if (!points) continue
     const rate = st.correct / st.total
@@ -85,12 +93,13 @@ export function priorities(attempts: Attempt[], subjectId: string): Priority[] {
       gap,
       value: gap / (part2 ? PART2_EFFORT : 1),
       part2,
+      rough: st.total < ENOUGH_TRIES,
     })
   }
   return out.sort((a, b) => b.value - a.value)
 }
 
-/** Номера, по которым ещё нет замера: их надо сначала прорешать, а не чинить. */
+/** Номера, по которым нет ни одной попытки: их надо сначала прорешать, а не чинить. */
 export function notMeasured(attempts: Attempt[], subjectId: string): number[] {
   const tasks = EGE_TASKS[subjectId]
   if (!tasks) return []
@@ -99,7 +108,7 @@ export function notMeasured(attempts: Attempt[], subjectId: string): number[] {
     if (a.subjectId !== subjectId || a.correct === null || !a.taskNo) continue
     tries.set(a.taskNo, (tries.get(a.taskNo) ?? 0) + 1)
   }
-  return tasks.filter((t) => (tries.get(t.no) ?? 0) < ENOUGH_TRIES).map((t) => t.no)
+  return tasks.filter((t) => !tries.get(t.no)).map((t) => t.no)
 }
 
 /**
