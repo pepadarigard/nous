@@ -181,13 +181,32 @@ export interface CallOpts {
   user: string
   temperature?: number
   maxTokens?: number
+  /**
+   * Картинки к запросу как data:URL — например, фото решения на листе.
+   *
+   * Уходят в том же сообщении, что и текст, массивом частей: так устроен
+   * OpenAI-совместимый формат, а все наши провайдеры совместимы с ним. Модель
+   * без зрения такой массив либо проигнорирует, либо ответит ошибкой, поэтому
+   * предупреждать о нужной модели надо ДО отправки, а не ловить это здесь.
+   */
+  images?: string[]
 }
+
+/** Содержимое сообщения: просто текст или текст с картинками. */
+function userContent(opts: CallOpts): unknown {
+  if (!opts.images?.length) return opts.user
+  return [
+    { type: 'text', text: opts.user },
+    ...opts.images.map((url) => ({ type: 'image_url', image_url: { url } })),
+  ]
+}
+
 export async function callJSON(cfg: AppConfig, opts: CallOpts): Promise<any> {
   const base: GroqBody = {
     model: cfg.textModel,
     messages: [
       { role: 'system', content: opts.system },
-      { role: 'user', content: opts.user },
+      { role: 'user', content: userContent(opts) },
     ],
     temperature: opts.temperature ?? 0.3,
     max_tokens: opts.maxTokens ?? 4000,

@@ -36,6 +36,14 @@ export interface CheckInput {
   task: string // условие задания
   solution: string // ответ ученика
   criteria?: string // критерии из материалов ученика, если он их дал
+  /**
+   * Фото решения на листе как data:URL.
+   *
+   * Вторую часть на экзамене пишут рукой, и переписывать её в поле ввода —
+   * лишняя работа, при которой половина выкладок теряется по дороге. Пусть
+   * модель смотрит на тот же лист, который увидел бы эксперт.
+   */
+  photos?: string[]
 }
 
 /** Проверить развёрнутый ответ по критериям и выставить баллы по пунктам. */
@@ -72,9 +80,16 @@ export async function checkSolution(cfg: AppConfig, input: CheckInput): Promise<
     (input.taskNo ? 'ЗАДАНИЕ № ' + input.taskNo + (title ? ' (' + title + ')' : '') + '\n' : '') +
     (input.criteria ? '\nКРИТЕРИИ (из материалов ученика, опирайся в первую очередь на них):\n' + input.criteria.slice(0, 4000) + '\n' : '') +
     '\nУСЛОВИЕ ЗАДАНИЯ:\n' + (input.task.trim() || '(ученик не привёл условие — оценивай по тексту ответа)') +
-    '\n\nОТВЕТ УЧЕНИКА:\n' + input.solution.trim()
+    (input.photos?.length
+      ? '\n\nОТВЕТ УЧЕНИКА — НА ФОТО (' +
+        input.photos.length +
+        ' шт.). Прочитай рукописное решение с изображения и оценивай именно его. ' +
+        'Если часть записи не разобрать — скажи об этом прямо и не додумывай за ученика: ' +
+        'выдуманная выкладка хуже честного «не видно».'
+      : '') +
+    (input.solution.trim() ? '\n\nОТВЕТ УЧЕНИКА:\n' + input.solution.trim() : '')
 
-  const raw = await callJSON(cfg, { system, user, temperature: 0.2, maxTokens: 2200 })
+  const raw = await callJSON(cfg, { system, user, temperature: 0.2, maxTokens: 2200, images: input.photos })
   const criteria: CriterionScore[] = Array.isArray(raw?.criteria)
     ? raw.criteria.map((c: any) => ({
         name: cleanMath(String(c?.name ?? 'Критерий')),

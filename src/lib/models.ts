@@ -51,6 +51,32 @@ export function isBadModel(id: string): boolean {
   return EXCLUDE.test(id)
 }
 
+/**
+ * Модели, которые умеют СМОТРЕТЬ на картинку.
+ *
+ * Нужно для проверки решения по фото: вторую часть пишут на листе, и без
+ * зрения модель не увидит ни выкладок, ни чертежа. Список проверяется по имени
+ * — точного признака в OpenAI-совместимом API нет, а спрашивать модель «умеешь
+ * ли ты видеть» бессмысленно.
+ *
+ * Отсюда правило: это подсказка, а не запрет. Ошибиться можно в обе стороны
+ * (имена моделей меняются каждый месяц), поэтому приложение предупреждает и
+ * даёт отправить, а не блокирует.
+ */
+const VISION = /gpt-4o|gpt-4\.[1-9]|gpt-5|llama-?4|maverick|scout|gemini|pixtral|qwen.*-?vl|glm-\dv|intern-?vl|molmo|vision|omni/i
+
+/** Похоже ли, что модель видит картинки. */
+export function canSee(id: string): boolean {
+  return VISION.test(id)
+}
+
+/** Самая подходящая для зрения из доступных — чтобы предложить её в один клик. */
+export function pickVisionModel(available: string[], provider?: string): string | null {
+  const list = available.filter(canSee).filter((id) => (provider === 'openrouter' ? id.endsWith(':free') : true))
+  if (!list.length) return null
+  return [...list].sort((a, b) => modelScore(b) - modelScore(a))[0]
+}
+
 /** Только модели, пригодные для быстрого чата/текста. Для OpenRouter — только бесплатные (:free). */
 export function chatModels(available: string[], provider?: string): string[] {
   const base = available.filter((id) => !EXCLUDE.test(id))
