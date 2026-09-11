@@ -16,6 +16,7 @@
 import type { Question } from '../types'
 import { PARONYMS, PLEONASM, FORMS } from '../data/norms'
 import { ROOT_WORDS, PREFIX_WORDS, SUFFIX_WORDS, ENDING_WORDS, type GapWord } from '../data/spelling'
+import { gridPolygon, polygonArea, lineGraph, areaUnder, type Cell, type GraphPoint } from './figures'
 import { uid } from './api'
 
 export interface GeneratedTask {
@@ -25,6 +26,8 @@ export interface GeneratedTask {
   text: string
   answer: string
   solution: string
+  /** Свой чертёж как data:URL. Есть там, где без рисунка задания не существует. */
+  figure?: string
 }
 
 /** Источник случайности. Свой — чтобы можно было воспроизвести набор в тестах. */
@@ -51,7 +54,7 @@ const shuffle = <T,>(r: Rnd, a: readonly T[]): T[] => {
  */
 const dec = (x: number) => String(Math.round(x * 1e6) / 1e6).replace('.', ',')
 
-type Family = (r: Rnd) => { text: string; answer: string; solution: string } | null
+type Family = (r: Rnd) => { text: string; answer: string; solution: string; figure?: string } | null
 
 interface TaskSpec {
   topic: string
@@ -92,6 +95,9 @@ const MATH: Record<number, TaskSpec> = {
           solution: `Площадь параллелограмма: S = a · h.\nS = ${a} · ${h} = ${a * h}.`,
         }
       },
+      // Фигура на клетчатой бумаге. Условия тут нет вообще — есть рисунок,
+      // и без него задание не существует. Раньше генератор такие пропускал.
+      (r) => gridFigureTask(r),
     ],
   },
   2: {
@@ -686,6 +692,8 @@ const PHYSICS: Record<number, TaskSpec> = {
   1: {
     topic: 'Кинематика',
     families: [
+      // Путь по графику скорости: задание целиком в рисунке.
+      (r) => speedGraphTask(r),
       (r) => {
         const a = pick(r, [2, 4, 6, 8, 10] as const), t = int(r, 2, 9)
         return {
@@ -1007,6 +1015,107 @@ const STRESS: readonly (readonly [string, string])[] = [
 
 
 /**
+ * Площадь фигуры на клетчатой бумаге (профильная математика, № 1).
+ *
+ * Вершины кладём строго в узлы сетки, а площадь считаем шнурованием по тем же
+ * координатам, которыми рисуется многоугольник, — разойтись рисунку и ответу
+ * негде. Отбраковываем вырожденные и слишком мелкие фигуры: по ним не видно,
+ * что задание про площадь.
+ */
+function gridFigureTask(r: Rnd) {
+  const cols = int(r, 7, 10)
+  const rows = int(r, 6, 8)
+  const kind = pick(r, ['треугольник', 'четырёхугольник'] as const)
+  const n = kind === 'треугольник' ? 3 : 4
+
+  const pts: Cell[] = []
+  const used = new Set<string>()
+  for (let i = 0; i < n; i++) {
+    let p: Cell | null = null
+    for (let t = 0; t < 40 && !p; t++) {
+      const c = { x: int(r, 0, cols), y: int(r, 0, rows) }
+      if (!used.has(c.x + ':' + c.y)) p = c
+    }
+    if (!p) return null
+    used.add(p.x + ':' + p.y)
+    pts.push(p)
+  }
+  // Обходим вершины по кругу вокруг центра — иначе многоугольник получится
+  // самопересекающимся, а шнурование для такого считает не то, что нарисовано.
+  const cx = pts.reduce((s, p) => s + p.x, 0) / n
+  const cy = pts.reduce((s, p) => s + p.y, 0) / n
+  pts.sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx))
+
+  const area = polygonArea(pts)
+  if (area < 6 || !Number.isInteger(area * 2)) return null
+  // Отбраковка вырожденных фигур. Одних размеров мало: треугольник шириной в
+  // шесть клеток и высотой в две проходит их, а выглядит как полоска, по
+  // которой площадь на глаз не прикинуть. Поэтому смотрим ещё и на то, какую
+  // долю своей рамки фигура занимает.
+  const spanX = Math.max(...pts.map((p) => p.x)) - Math.min(...pts.map((p) => p.x))
+  const spanY = Math.max(...pts.map((p) => p.y)) - Math.min(...pts.map((p) => p.y))
+  if (spanX < 4 || spanY < 4) return null
+  if (area < spanX * spanY * 0.3) return null
+
+  const coords = pts.map((p) => `(${p.x}; ${p.y})`).join(', ')
+  return {
+    text: `На клетчатой бумаге со стороной клетки 1 изображён ${kind}. Найдите его площадь.`,
+    answer: dec(area),
+    solution:
+      `Считать по клеткам необязательно — достаточно координат вершин: ${coords}.\n` +
+      `Площадь через координаты (формула площади многоугольника):\n` +
+      `S = ½·|Σ (xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ)| = ${dec(area)}.\n` +
+      `Тот же ответ даёт достройка до прямоугольника с вычитанием лишних треугольников.`,
+    figure: gridPolygon(pts, cols, rows),
+  }
+}
+
+/**
+ * Путь по графику скорости (физика, № 1).
+ *
+ * Путь — это площадь под графиком, и никакого текстового условия здесь нет:
+ * всё в рисунке. Ломаная строится по целым узлам, площадь считается по тем же
+ * узлам трапециями, поэтому ответ ровно такой, какой «видно» на картинке.
+ */
+function speedGraphTask(r: Rnd) {
+  const xMax = int(r, 4, 6)
+  const yMax = int(r, 3, 5)
+  const pts: GraphPoint[] = [{ t: 0, v: int(r, 0, yMax) }]
+  let t = 0
+  while (t < xMax) {
+    const step = Math.min(xMax - t, int(r, 1, 2))
+    t += step
+    pts.push({ t, v: int(r, 0, yMax) })
+  }
+  if (pts.length < 3) return null
+  const s = areaUnder(pts)
+  if (s < 2) return null
+  // Половинки допустимы (трапеция), а более дробного на клетчатом графике не бывает.
+  if (Math.round(s * 2) !== s * 2) return null
+
+  return {
+    text:
+      `По графику зависимости модуля скорости тела от времени определите путь, ` +
+      `пройденный телом от момента времени 0 с до момента времени ${xMax} с. ` +
+      `Ответ дайте в метрах.`,
+    answer: dec(s),
+    solution:
+      `Путь — это площадь фигуры под графиком скорости.\n` +
+      `Разбиваем её на трапеции по участкам между узлами; площадь трапеции — ` +
+      `полусумма оснований на высоту:\n` +
+      pts
+        .slice(1)
+        .map((p, i) => {
+          const a = pts[i]
+          return `  от ${a.t} до ${p.t} с: (${a.v} + ${p.v})/2 · ${p.t - a.t} = ${dec(((a.v + p.v) / 2) * (p.t - a.t))}`
+        })
+        .join('\n') +
+      `\nСумма: ${dec(s)} м.`,
+    figure: lineGraph(pts, { xLabel: 't, с', yLabel: 'v, м/с', xMax, yMax }),
+  }
+}
+
+/**
  * Задания 9–12: пять рядов слов с пропусками; назвать ряды, где пропущена
  * ОДНА И ТА ЖЕ буква. Ответ — номера рядов подряд, как в бланке.
  *
@@ -1214,6 +1323,23 @@ export function generateOne(subjectId: string, taskNo: number, rnd: Rnd = Math.r
 }
 
 /**
+ * Ключ, по которому задания считаются одинаковыми.
+ *
+ * Одного текста мало. У заданий с чертежом текст ОДИН И ТОТ ЖЕ — «на клетчатой
+ * бумаге изображён треугольник, найдите площадь», — а различаются они рисунком.
+ * По тексту такие задания схлопывались в одно, и из двухсот сгенерированных в
+ * банк попадало два.
+ */
+export function taskKey(text: string, figure?: string): string {
+  return figure ? text + ' ' + figure : text
+}
+
+/** Тот же ключ для задания, которое уже лежит в банке. */
+export function bankKey(q: { text: string; images?: string[] }): string {
+  return taskKey(q.text, q.images?.[0])
+}
+
+/**
  * Сколько РАЗЛИЧНЫХ заданий номер может дать вообще. У числовых семейств запас
  * огромный, а у тех, что собираются из списка слов, он равен длине списка —
  * и обещать там «бесконечно» было бы враньём.
@@ -1222,7 +1348,7 @@ export function variantCapacity(subjectId: string, taskNo: number, probes = 1500
   const seen = new Set<string>()
   for (let i = 0; i < probes; i++) {
     const t = generateOne(subjectId, taskNo)
-    if (t) seen.add(t.text)
+    if (t) seen.add(taskKey(t.text, t.figure))
   }
   return seen.size
 }
@@ -1247,8 +1373,10 @@ export function generateTasks(
   // и без него цикл крутился бы вечно, пытаясь набрать недостижимое число.
   for (let tries = 0; tries < count * 60 && out.length < count; tries++) {
     const t = generateOne(subjectId, taskNo, rnd)
-    if (!t || seen.has(t.text)) continue
-    seen.add(t.text)
+    if (!t) continue
+    const key = taskKey(t.text, t.figure)
+    if (seen.has(key)) continue
+    seen.add(key)
     out.push({
       id: uid('q_'),
       subjectId: t.subjectId,
@@ -1257,6 +1385,7 @@ export function generateTasks(
       text: t.text,
       answer: t.answer,
       solution: t.solution,
+      images: t.figure ? [t.figure] : undefined,
       origin: 'generated',
       createdAt: new Date().toISOString(),
     })

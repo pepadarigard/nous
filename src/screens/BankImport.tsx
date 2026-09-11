@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import BankDownload from './BankDownload'
+import { bankKey } from '../lib/taskgen'
 import { SUBJECTS } from '../data/subjects'
 import type { Question } from '../types'
 import { extractQuestions, FIELD_LABEL, guessMapping, jsonToTable, parseTable, textParagraphs, type DraftQuestion, type FieldName } from '../lib/bank'
@@ -368,7 +369,7 @@ function SeedCard({ onDone }: { onDone: () => void }) {
   const numbers = subjects.reduce((n, sid) => n + (cov[sid]?.length ?? 0), 0)
 
   function load() {
-    const fresh = generateStarterSet(subjects, 10, Math.random, new Set((data.questions ?? []).map((q) => q.text)))
+    const fresh = generateStarterSet(subjects, 10, Math.random, new Set((data.questions ?? []).map(bankKey)))
     if (!fresh.length) return
     addQuestions(fresh)
     setAdded(fresh.length)

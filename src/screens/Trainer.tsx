@@ -6,7 +6,7 @@ import type { Attempt, Question } from '../types'
 import { isCorrect, taskStats, trainingQueue } from '../lib/bank'
 import { dueForReview } from '../lib/review'
 import { REVIEW_SESSION } from '../lib/today'
-import { canGenerate, generateTasks, generatedNumbers } from '../lib/taskgen'
+import { canGenerate, generateTasks, generatedNumbers, bankKey } from '../lib/taskgen'
 import { isPart2, part2Label } from '../data/egeTasks'
 import { todayISO } from '../lib/schedule'
 import { countOf } from '../lib/plural'
@@ -175,12 +175,12 @@ function TrainTab({
     const subjects = subject !== 'all' ? [subject] : data.subjects.length ? data.subjects : ['russian']
     const fresh: Question[] = []
     // Что уже лежит в банке — иначе повторное нажатие возвращало бы те же задания.
-    const known = new Set(questions.map((q) => q.text))
+    const known = new Set(questions.map(bankKey))
     for (const sid of subjects) {
       const nos = taskNo !== 'all' ? (canGenerate(sid, taskNo) ? [taskNo] : []) : generatedNumbers(sid)
       for (const no of nos) {
         const made = generateTasks(sid, no, taskNo !== 'all' ? count : Math.max(2, Math.round(count / nos.length)), Math.random, known)
-        for (const q of made) known.add(q.text)
+        for (const q of made) known.add(bankKey(q))
         fresh.push(...made)
       }
     }

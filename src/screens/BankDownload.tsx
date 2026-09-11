@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { subjectName, subjectById } from '../data/subjects'
 import { BANK_SUBJECTS, canDownload, downloadSubject, type BankProgress } from '../lib/sdamgia'
 import { isTauri, humanError } from '../lib/api'
+import { bankKey } from '../lib/taskgen'
 import { countOf } from '../lib/plural'
 import { Download, Loader2, Check, X, Image as ImageIcon } from 'lucide-react'
 
@@ -44,7 +45,7 @@ export default function BankDownload({ onDone }: { onDone?: () => void }) {
     setAdded({})
     abort.current = { aborted: false }
     // Что уже лежит в банке — иначе повторная загрузка удвоила бы всё.
-    const known = new Set((data.questions ?? []).map((q) => q.text))
+    const known = new Set((data.questions ?? []).map(bankKey))
     try {
       for (const sid of chosen) {
         if (abort.current.aborted) break
@@ -57,7 +58,7 @@ export default function BankDownload({ onDone }: { onDone?: () => void }) {
         })
         // Складываем сразу после предмета: если следующий упадёт, этот уже сохранён.
         if (qs.length) addQuestions(qs)
-        for (const q of qs) known.add(q.text)
+        for (const q of qs) known.add(bankKey(q))
         setAdded((a) => ({ ...a, [sid]: qs.length }))
       }
     } catch (e) {

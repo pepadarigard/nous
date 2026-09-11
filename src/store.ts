@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { AppConfig, AppData, Attempt, Block, LessonBrief, Material, MockResult, PlanEvent, ProgressEvent, Question, ScheduleRules, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
 import { emptyData, emptyRules } from './types'
-import { generateStarterSet } from './lib/taskgen'
+import { generateStarterSet, bankKey } from './lib/taskgen'
 import { catchUpPlan } from './lib/schedule'
 import { loadState, saveState, uid, humanError, deleteMaterialFiles } from './lib/api'
 import { tutorChatStream } from './lib/ai'
@@ -466,7 +466,7 @@ export const useStore = create<Store>((set, get) => {
       commit((d) => {
         const next = { ...d, onboarded: true }
         if (!(d.questions ?? []).length) {
-          const fresh = generateStarterSet(d.subjects, 8, Math.random, new Set((d.questions ?? []).map((q) => q.text)))
+          const fresh = generateStarterSet(d.subjects, 8, Math.random, new Set((d.questions ?? []).map(bankKey)))
           if (fresh.length) next.questions = fresh
         }
         return next
