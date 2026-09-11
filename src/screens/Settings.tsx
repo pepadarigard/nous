@@ -6,6 +6,7 @@ import { PROVIDERS, PROVIDER_ORDER, activeKey, isLocal, keyOf, keyPatch, normPro
 import { appVersion, checkUpdate, downloadUpdate, installUpdate, GITHUB_URL, type UpdateInfo } from '../lib/update'
 import { subjectName } from '../data/subjects'
 import type { AppData, Provider } from '../types'
+import { buildSyncFile, mergeState, parseSyncFile, previewMerge } from '../lib/sync'
 import Modal from '../ui/Modal'
 import PlanImporter from './PlanImporter'
 import PlanExtender from './PlanExtender'
@@ -42,6 +43,7 @@ export default function Settings() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [exportMsg, setExportMsg] = useState<{ ok: boolean; text: string; path?: string } | null>(null)
   const [importData, setImportData] = useState<AppData | null>(null)
+  const [importSavedAt, setImportSavedAt] = useState('')
   const [importErr, setImportErr] = useState('')
 
   // О приложении: версия и обновления
@@ -104,6 +106,9 @@ export default function Settings() {
     saveKeyFor(prov, keys[prov])
   }
 
+  // Что именно приедет из файла — считаем заранее, чтобы показать до нажатия.
+  const preview = importData ? previewMerge(data, importData, data.savedAt ?? '', importSavedAt) : null
+
   const best = available ? pickBestModel(available, prov) : null
   const smarter = best && modelScore(best) > modelScore(textModel) ? best : null
 
@@ -140,8 +145,8 @@ export default function Settings() {
 
   async function doExport() {
     setExportMsg(null)
-    const json = JSON.stringify(data, null, 2)
-    const name = `nous-backup-${new Date().toISOString().slice(0, 10)}.json`
+    const json = JSON.stringify(buildSyncFile(data, isTauri ? 'компьютер' : 'браузер'), null, 2)
+    const name = `nous-${new Date().toISOString().slice(0, 10)}.json`
     try {
       if (isTauri) {
         const { invoke } = await import('@tauri-apps/api/core')
@@ -175,18 +180,19 @@ export default function Settings() {
     setImportErr('')
     if (!f) return
     try {
-      const parsed = JSON.parse(await f.text())
-      if (!parsed || typeof parsed !== 'object' || !parsed.config) throw new Error('bad')
-      setImportData(parsed as AppData)
-    } catch {
-      setImportErr('Это не похоже на бэкап Nous — нужен JSON-файл, созданный кнопкой «Экспорт».')
+      const parsed = parseSyncFile(await f.text())
+      setImportData(parsed.data)
+      setImportSavedAt(parsed.savedAt)
+    } catch (e) {
+      setImportErr(humanError(e))
     }
     if (fileRef.current) fileRef.current.value = ''
   }
 
   async function applyImport() {
     if (!importData) return
-    await saveState(importData)
+    // Сливаем, а не заменяем: на другом устройстве тоже работали.
+    await saveState(mergeState(data, importData, data.savedAt ?? '', importSavedAt))
     window.location.reload()
   }
 
@@ -386,13 +392,19 @@ export default function Settings() {
       </div>
 
       <div className="card" style={{ marginBottom: 18 }}>
-        <h3>Данные</h3>
+        <h3>Данные и синхронизация</h3>
+        {/* Сервера у нас нет намеренно: обещание приложения — «данные твои и
+            лежат у тебя». Перенос идёт файлом, который ученик кладёт в своё
+            облако, шлёт себе в мессенджер или носит на флешке. */}
         <p className="small muted" style={{ marginTop: 0 }}>
-          Бэкап одним файлом: план, прогресс, достижения и настройки. Пригодится при переустановке или переносе на другой ПК.
+          Один файл со всей подготовкой: план, банк заданий, история решений, настройки. Им же
+          переносят работу между компьютером и телефоном — <b>данные не заменяются, а
+          складываются</b>: решал днём на телефоне, вечером на компьютере — останется и то, и
+          другое. Никакого сервера: файл идёт через твоё облако или мессенджер.
         </p>
         <div className="row wrap" style={{ gap: 10 }}>
-          <button className="btn" onClick={doExport}><Download size={15} /> Экспорт данных</button>
-          <button className="btn" onClick={() => fileRef.current?.click()}><Upload size={15} /> Импорт из файла</button>
+          <button className="btn btn-primary" onClick={doExport}><Download size={15} /> Сохранить для переноса</button>
+          <button className="btn" onClick={() => fileRef.current?.click()}><Upload size={15} /> Загрузить и объединить</button>
           <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={(e) => onImportFile(e.target.files?.[0])} />
         </div>
         {exportMsg && (
@@ -471,16 +483,34 @@ export default function Settings() {
           </div>
         </Modal>
       )}
-      {importData && (
-        <Modal title="Импортировать данные?" onClose={() => setImportData(null)}>
-          <p className="muted">
-            Текущие план, прогресс и настройки будут <b>заменены</b> данными из файла
-            {importData.studentName ? <> (ученик: <b>{importData.studentName}</b>)</> : null}. Продолжить?
+      {importData && preview && (
+        <Modal title="Объединить с этим файлом?" onClose={() => setImportData(null)}>
+          {/* Показываем ровно то, что изменится. Слияние необратимо, и человек
+              должен видеть цену решения ДО нажатия, а не после. */}
+          <p className="muted" style={{ marginTop: 0 }}>
+            Из файла
+            {importData.studentName ? <> (ученик: <b>{importData.studentName}</b>)</> : null}
+            {importSavedAt ? <> от {new Date(importSavedAt).toLocaleString('ru-RU')}</> : <> без отметки времени</>}{' '}
+            добавится:
+          </p>
+          <ul className="small">
+            <li>решённых заданий: <b>{preview.attempts}</b></li>
+            <li>заданий в банке: <b>{preview.questions}</b></li>
+            <li>пробников: <b>{preview.mocks}</b>, разборов ошибок: <b>{preview.mistakes}</b></li>
+            <li>вариантов: <b>{preview.variants}</b>, дел в календаре: <b>{preview.events}</b></li>
+            <li>отметок «выполнено» в плане: <b>{preview.lessonsDone}</b></li>
+          </ul>
+          <p className="small muted">
+            Ничего не удалится. Цели, расписание и ключи возьмутся{' '}
+            <b>{preview.takesSettings === 'из файла' ? 'из файла — он новее' : 'отсюда — он новее файла'}</b>.
+            {preview.materials > 0 && (
+              <> Описания материалов приедут ({preview.materials}), но сами файлы остались на другом устройстве.</>
+            )}
           </p>
           <div className="row">
             <div className="spacer" />
             <button className="btn btn-ghost" onClick={() => setImportData(null)}>Отмена</button>
-            <button className="btn btn-primary" onClick={applyImport}>Да, импортировать</button>
+            <button className="btn btn-primary" onClick={applyImport}>Объединить</button>
           </div>
         </Modal>
       )}

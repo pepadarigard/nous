@@ -90,6 +90,9 @@ export const useStore = create<Store>((set, get) => {
    * нельзя — про это надо сказать сразу.
    */
   const persist = (next: AppData, bankChanged = true) => {
+    // Штамп времени ставим здесь, в единственной точке записи: любое изменение
+    // проходит через persist, и забыть его негде.
+    next.savedAt = new Date().toISOString()
     saveState(next, bankChanged)
       .then(() => {
         if (get().saveError) set({ saveError: '' })
