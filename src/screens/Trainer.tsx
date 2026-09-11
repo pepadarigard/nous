@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../store'
 import { SUBJECTS, subjectById } from '../data/subjects'
 import type { Attempt, Question } from '../types'
-import { isCorrect, taskStats, trainingQueue } from '../lib/bank'
+import { fitsBlank, isCorrect, taskStats, trainingQueue } from '../lib/bank'
 import { dueForReview } from '../lib/review'
 import { REVIEW_SESSION } from '../lib/today'
 import { canGenerate, generateTasks, generatedNumbers, bankKey } from '../lib/taskgen'
@@ -208,7 +208,10 @@ function TrainTab({
 
   function check() {
     if (!q || verdict !== 'unchecked') return
-    const res = isCorrect(given, q.answer)
+    // Ответ, который в бланк не помещается (у информатики в задании 25 их
+    // двенадцать штук), сверять посимвольно нельзя — это вердикт наугад.
+    // Такое задание ученик отмечает сам, глядя на разбор.
+    const res = fitsBlank(q.answer) ? isCorrect(given, q.answer) : null
     setVerdict(res)
     if (res !== null) {
       recordAttempt({ questionId: q.id, subjectId: q.subjectId, taskNo: q.taskNo, answer: given, correct: res })
@@ -259,6 +262,7 @@ function TrainTab({
     const s = subjectById(q.subjectId)
     const answered = verdict !== 'unchecked'
     const part2 = isPart2(q.subjectId, q.taskNo)
+    const longAnswer = part2 || !fitsBlank(q.answer)
     return (
       <div className="card" style={{ maxWidth: 760 }}>
         <div className="row wrap" style={{ gap: 8, marginBottom: 12 }}>
@@ -280,7 +284,7 @@ function TrainTab({
           </ul>
         )}
 
-        {part2 ? (
+        {longAnswer ? (
           <label className="field" style={{ marginTop: 16 }}>
             <span>Твой ответ</span>
             <div className="small muted" style={{ marginBottom: 6 }}>
@@ -324,7 +328,14 @@ function TrainTab({
           <div className="verdict self">
             <Lightbulb size={16} />
             <div style={{ flex: 1 }}>
-              У этого задания нет эталонного ответа — сверься с разбором и отметь сам.
+              {q.answer ? (
+                <>
+                  Такой ответ в бланк не помещается — сверься сам. Верный ответ:{' '}
+                  <b>{q.answer.split('|')[0]}</b>
+                </>
+              ) : (
+                <>У этого задания нет эталонного ответа — сверься с разбором и отметь сам.</>
+              )}
               {q.solution && <div className="sol-body" style={{ marginTop: 6 }}>{q.solution}</div>}
             </div>
             <button className="btn btn-sm" onClick={() => selfMark(true)}>Решил верно</button>

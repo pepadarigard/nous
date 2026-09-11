@@ -113,10 +113,45 @@ function clean(s: string): string {
   return s
     .replace(/­/g, '')
     .replace(/ /g, ' ')
+    // Невидимые «склейки», которыми сайт запрещает перенос строки: они стоят
+    // после дефиса в «IP-адрес» и после дробной черты в «м/с». Глазом их не
+    // видно, а ответ «0,09 м/с» из-за них не совпадал сам с собой.
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+    .replace(/\u2011/g, '-')
     .replace(/[ \t]+/g, ' ')
     .replace(/ ?\n ?/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
+}
+
+/**
+ * Ответ с сайта — к виду бланка ЕГЭ.
+ *
+ * Сайт хранит ответ так, как показывает его человеку, и в двух местах это
+ * расходится с бланком:
+ *
+ *  1. Несколько полей ответа склеены амперсандом: «586&3» у информатики — это
+ *     два ответа подряд, а «&» придуман сайтом для себя.
+ *  2. У физики к числу дописана единица измерения: «0,09 м/с.». В бланк единицы
+ *     не пишут никогда — условие само говорит, в чём отвечать. Ученик напишет
+ *     «0,09», и без чистки его верный ответ считался бы ошибкой.
+ *
+ * Хвост срезается, только если он ВЕСЬ похож на единицу измерения. «3 или 4»,
+ * «а) 11 285; б) нет» и любое слово остаются как есть.
+ */
+function cleanAnswer(raw: string): string | undefined {
+  let a = raw.replace(/^Ответ:\s*/i, '').trim()
+  if (!a) return undefined
+  a = a.split('&').map((p) => p.trim()).filter(Boolean).join(' ')
+  const unit = a.match(
+    /^(-?\d+(?:[.,]\d+)?)\s*(?:[A-Za-zА-Яа-яЁё]+(?:\s*\/\s*[A-Za-zА-Яа-яЁё]+)?[²³°%]?\.?)$/,
+  )
+  if (unit) a = unit[1]
+  a = a.replace(/\.$/, '').trim()
+  // Пустышка: остались одни пункты «а) б)» и знаки препинания. Такой «эталон»
+  // хуже, чем никакого, — по нему нечего сверять, а выглядит он как ответ.
+  if (!/[\p{L}\d]/u.test(a.replace(/\b[а-яa-z]\)/gi, ''))) return undefined
+  return a || undefined
 }
 
 /**
@@ -300,12 +335,24 @@ export function parsePrintPage(html: string, host: string): ScrapedTask[] {
    * задвоится.
    */
   const candidates = blocks.map((block) => {
-    const found = [...block.querySelectorAll('.probtext, .pbody')].filter(
+    const all = [...block.querySelectorAll('.probtext, .pbody')].filter(
       // Критерии оценивания у заданий второй части лежат в СВОЁМ .pbody внутри
       // .prob_crits. Отсекать их надо здесь, по предку: если выкидывать позже,
       // из склеенной копии .prob_crits уже не виден — он остался снаружи.
       (el) => !el.closest('.prob_crits'),
     )
+    /**
+     * Справка сайта («Источник», «Актуальность», «Правило: … Что проверяется и
+     * что нужно знать?») лежит в .align-left и к условию не относится никогда.
+     *
+     * В подборке по номеру она у всех заданий одна и её ловил отсев по повторам
+     * ниже. В ЦЕЛОМ ВАРИАНТЕ у каждого номера справка СВОЯ — повторов нет, и
+     * семнадцать из двадцати семи условий по русскому приезжали с тринадцатью
+     * тысячами знаков чужой теории впереди. Надёжная примета тут одна: где
+     * элемент лежит.
+     */
+    const real = all.filter((el) => !el.closest('.align-left'))
+    const found = real.length ? real : all
     return found.filter((el) => !found.some((o) => o !== el && o.contains(el)))
   })
 
@@ -370,8 +417,19 @@ export function parsePrintPage(html: string, host: string): ScrapedTask[] {
     }
 
     const text = clean(blockText(copy))
-    const answerRaw = clean(block.querySelector('.answer')?.textContent ?? '')
-    const answer = answerRaw.replace(/^Ответ:\s*/i, '').trim() || undefined
+    // В ответе тоже бывают формулы-картинки. Без разворота «а) 4 ≤ x ≤ 8; б) 7»
+    // превращалось в «а) б)» — эталон, по которому нечего сверять.
+    const ansCopy = block.querySelector('.answer')?.cloneNode(true) as HTMLElement | undefined
+    if (ansCopy) {
+      for (const img of ansCopy.querySelectorAll('img')) {
+        if (img.classList.contains('tex')) {
+          img.replaceWith(doc.createTextNode(' ' + formulaFromAlt(img.getAttribute('alt') ?? '') + ' '))
+        } else {
+          img.remove()
+        }
+      }
+    }
+    const answer = cleanAnswer(clean(ansCopy ? blockText(ansCopy) : ''))
     const solCopy = block.querySelector('.solution')?.cloneNode(true) as HTMLElement | undefined
     if (solCopy) {
       for (const img of solCopy.querySelectorAll('img')) {
@@ -458,6 +516,15 @@ export interface BankOptions {
   withImages?: boolean
   /** Тексты, которые уже есть в банке: повторно их не берём. */
   known?: ReadonlySet<string>
+  /**
+   * Задания Решу ЕГЭ, которые уже лежат в банке, — по номеру на сайте.
+   *
+   * Сверять по тексту здесь мало: у задания с чертежом текст в банке уже
+   * подчищен от пометки «[чертёж]», и с сырым текстом со страницы он не
+   * совпадёт. Номер задания на сайте — точная и неизменная примета, поэтому
+   * повторная загрузка опирается на неё.
+   */
+  knownIds?: ReadonlySet<string>
   onProgress?: (p: BankProgress) => void
   /** Прервать загрузку (ученик закрыл окно). */
   signal?: { aborted: boolean }
@@ -485,6 +552,7 @@ export async function downloadSubject(subjectId: string, opts: BankOptions = {})
   if (!host) return []
   const perTask = opts.perTask ?? 50
   const known = new Set(opts.known ?? [])
+  const knownIds = new Set(opts.knownIds ?? [])
   const report = (done: number, total: number, got: number, note: string) =>
     opts.onProgress?.({ subjectId, done, total, got, note })
 
@@ -521,8 +589,10 @@ export async function downloadSubject(subjectId: string, opts: BankOptions = {})
         if (opts.signal?.aborted) break
         if (!t.taskNo || !t.answer) continue // без номера или без эталона задание бесполезно
         if ((byTask.get(t.taskNo) ?? 0) >= perTask) continue
+        if (t.sourceId && knownIds.has(t.sourceId)) continue
         if (known.has(t.text)) continue
         known.add(t.text)
+        if (t.sourceId) knownIds.add(t.sourceId)
 
         let text = t.text
         const images: string[] = []
@@ -559,5 +629,173 @@ export async function downloadSubject(subjectId: string, opts: BankOptions = {})
     report(ti + 1, themes.length, out.length, 'Скачано заданий: ' + out.length)
   }
 
+  return out
+}
+
+// ---------- целые варианты ----------
+
+/**
+ * Готовый вариант экзамена: задания по порядку, с первого номера до последнего.
+ *
+ * Отличается от подборки по номеру принципиально. Подборка — это тренировка
+ * одного умения; вариант — замер целиком, под таймером и в том порядке, в
+ * котором придётся решать на экзамене. Собрать такой из банка нельзя: в нём
+ * важен не только состав, но и то, что задания подобраны друг к другу.
+ */
+export interface ScrapedVariant {
+  /** Номер варианта на сайте — он же ссылка. */
+  sourceId: string
+  title: string
+  tasks: ScrapedTask[]
+}
+
+/**
+ * Список доступных вариантов.
+ *
+ * Сама страница — одностраничное приложение на восемь килобайт, в её HTML
+ * вариантов нет: список подгружается запросом к /newapi/general и лежит там
+ * в поле ourVariants. Поэтому разбирать надо JSON, а не разметку.
+ */
+export async function listVariants(subjectId: string): Promise<string[]> {
+  const host = BANK_HOSTS[subjectId]
+  if (!host) return []
+  const raw = await getPage(host + '/newapi/general')
+  let json: unknown
+  try {
+    json = JSON.parse(raw)
+  } catch {
+    throw new Error('Список вариантов не разобрался — сайт изменил ответ.')
+  }
+  const ids = (json as { ourVariants?: unknown })?.ourVariants
+  if (!Array.isArray(ids)) return []
+  return ids.map(String).filter((s) => /^\d+$/.test(s))
+}
+
+/** Скачать один вариант целиком. Печатная версия отдаёт его одной страницей. */
+export async function fetchVariant(subjectId: string, sourceId: string, no: number): Promise<ScrapedVariant | null> {
+  const host = BANK_HOSTS[subjectId]
+  if (!host) return null
+  const html = await getPage(`${host}/test?id=${sourceId}&print=true`)
+  const tasks = parsePrintPage(html, host)
+  if (tasks.length < 5) return null // не вариант, а огрызок
+  return { sourceId, title: 'Вариант ' + no, tasks }
+}
+
+/** Что получилось скачать: сам вариант и задания к нему. */
+export interface DownloadedVariant {
+  subjectId: string
+  sourceId: string
+  title: string
+  /** Только НОВЫЕ задания — их надо положить в банк. */
+  questions: Question[]
+  /** Весь вариант по порядку: и новые задания, и те, что уже лежали в банке. */
+  questionIds: string[]
+  /** Номер каждого задания в работе, параллельно questionIds. */
+  taskNos: number[]
+}
+
+/**
+ * Скачать несколько вариантов подряд.
+ *
+ * Задания варианта кладутся в тот же банк, что и всё остальное: тогда они
+ * заодно попадают в тренажёр и в повторение. Сам вариант — это только порядок,
+ * список идентификаторов, а не вторая копия заданий.
+ */
+export async function downloadVariants(
+  subjectId: string,
+  count: number,
+  opts: BankOptions & {
+    /**
+     * Задания Решу ЕГЭ, уже лежащие в банке: номер на сайте → наш id задания.
+     *
+     * Варианты собраны из того же пула, что и подборки по номерам, поэтому
+     * пересечение неизбежно. Скачивать копию нельзя: у одного задания должна
+     * быть одна личность, иначе попытки и повторение разъедутся на два
+     * одинаковых текста. Такие задания вариант просто переиспользует.
+     */
+    reuse?: ReadonlyMap<string, string>
+  } = {},
+): Promise<DownloadedVariant[]> {
+  const reuse = new Map(opts.reuse ?? [])
+  const report = (done: number, total: number, got: number, note: string) =>
+    opts.onProgress?.({ subjectId, done, total, got, note })
+
+  report(0, 1, 0, 'Смотрю, какие варианты есть…')
+  const ids = await listVariants(subjectId)
+  if (!ids.length) throw new Error('На сайте не нашлось готовых вариантов.')
+  const take = ids.slice(0, Math.max(1, count))
+
+  const out: DownloadedVariant[] = []
+  const now = new Date().toISOString()
+  for (let i = 0; i < take.length; i++) {
+    if (opts.signal?.aborted) break
+    report(i, take.length, out.length, `Вариант ${i + 1} из ${take.length}`)
+    let v: ScrapedVariant | null = null
+    try {
+      v = await fetchVariant(subjectId, take[i], i + 1)
+    } catch {
+      await sleep(PAUSE_MS)
+      continue // один вариант не открылся — остальные всё равно нужны
+    }
+    if (!v) {
+      await sleep(PAUSE_MS)
+      continue
+    }
+
+    const questions: Question[] = []
+    const questionIds: string[] = []
+    const taskNos: number[] = []
+    for (let ti = 0; ti < v.tasks.length; ti++) {
+      const t = v.tasks[ti]
+      // Такое задание уже есть в банке — берём его, а не вторую копию.
+      const already = t.sourceId ? reuse.get(t.sourceId) : undefined
+      if (already) {
+        questionIds.push(already)
+        taskNos.push(ti + 1)
+        continue
+      }
+      /**
+       * Номер задания в варианте — это ЕГО МЕСТО, а не «Тип» с сайта.
+       *
+       * «Тип» — внутренняя классификация Решу ЕГЭ, и в варианте она разъезжается
+       * с работой. У информатики проверка показала: на десятой позиции «Тип Д29»
+       * (номера нет вовсе), на тринадцатой «Тип Д30», а на двадцать третьей —
+       * «Тип 13», хотя стоит там настоящее задание 23 про исполнителя. Считать
+       * по «Типу» значило бы отдать ученику работу с двумя тринадцатыми
+       * заданиями, без десятого и двадцать третьего, и с чужими весами баллов.
+       */
+      const taskNo = ti + 1
+      let text = t.text
+      const images: string[] = []
+      if (t.imageUrls.length && opts.withImages !== false) {
+        for (const url of t.imageUrls.slice(0, 3)) {
+          const data = await getImage(url)
+          if (data && data.length <= MAX_IMAGE_BYTES) images.push(data)
+          await sleep(200)
+        }
+        if (images.length) text = text.replace(/\[чертёж\]\n?/g, '')
+      }
+      const q: Question = {
+        id: uid('q_'),
+        subjectId,
+        taskNo,
+        text: text.trim(),
+        answer: t.answer,
+        solution: t.solution,
+        criteria: t.criteria,
+        images: images.length ? images : undefined,
+        origin: 'import',
+        sourceId: t.sourceId ? 'sdamgia:' + t.sourceId : undefined,
+        createdAt: now,
+      }
+      questions.push(q)
+      questionIds.push(q.id)
+      taskNos.push(taskNo)
+      if (t.sourceId) reuse.set(t.sourceId, q.id)
+    }
+    out.push({ subjectId, sourceId: v.sourceId, title: v.title, questions, questionIds, taskNos })
+    report(i + 1, take.length, out.length, 'Скачано вариантов: ' + out.length)
+    await sleep(PAUSE_MS)
+  }
   return out
 }

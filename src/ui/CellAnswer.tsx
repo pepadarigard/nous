@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { BLANK_CELLS } from '../lib/bank'
 
 /**
  * Поле краткого ответа как в бланке ЕГЭ.
@@ -13,7 +14,7 @@ import { useEffect, useRef } from 'react'
  * ровно столько, сколько нужно, поле само подсказывает длину ответа — а на
  * экзамене такой подсказки нет.
  */
-const CELLS = 17
+const CELLS = BLANK_CELLS
 
 /** Что вообще можно писать в бланк: буквы, цифры, запятая в десятичной дроби, минус. */
 const ALLOWED = /[-0-9A-Za-zА-Яа-яЁё,]/

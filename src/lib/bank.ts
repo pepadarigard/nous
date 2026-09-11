@@ -56,6 +56,26 @@ function canonNumber(norm: string): string | null {
   return out.includes('e') ? null : out
 }
 
+/** Сколько клеток в бланке кратких ответов. */
+export const BLANK_CELLS = 17
+
+/**
+ * Влезает ли эталон в бланк кратких ответов.
+ *
+ * Не всякий ответ — короткий. У информатики в задании 25 их двенадцать штук
+ * подряд, у задания 27 — два поля по паре чисел; такое в бланк из семнадцати
+ * клеток не пишут, и сравнивать посимвольно там нечего. Приложение по этому
+ * признаку и решает, показать клеточки с автопроверкой или поле для решения
+ * с самопроверкой по разбору.
+ */
+export function fitsBlank(expected?: string): boolean {
+  if (!expected) return false
+  return expected.split('|').some((v) => {
+    const n = normAnswer(v).length
+    return n > 0 && n <= BLANK_CELLS
+  })
+}
+
 /** Совпадает ли ответ с эталоном. Несколько допустимых эталонов пишутся через | */
 export function isCorrect(given: string, expected?: string): boolean | null {
   if (!expected || !expected.trim()) return null // эталона нет — сравнивать не с чем

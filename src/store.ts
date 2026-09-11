@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppConfig, AppData, Attempt, Block, LessonBrief, Material, MockResult, PlanEvent, ProgressEvent, Question, ScheduleRules, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
+import type { AppConfig, AppData, Attempt, Block, ExamVariant, LessonBrief, Material, MockResult, PlanEvent, ProgressEvent, Question, ScheduleRules, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
 import { emptyData, emptyRules } from './types'
 import { generateStarterSet, bankKey } from './lib/taskgen'
 import { catchUpPlan } from './lib/schedule'
@@ -57,6 +57,13 @@ interface Store {
   removeQuestion: (id: string) => void
   recordAttempt: (a: Omit<Attempt, 'id' | 'at'>) => void
   recordMock: (m: Omit<MockResult, 'id' | 'at'>) => void
+  addVariant: (
+    v: { subjectId: string; title: string; sourceId?: string },
+    fresh: Question[],
+    questionIds: string[],
+    taskNos: number[],
+  ) => void
+  removeVariant: (id: string) => void
 
   setPlan: (p: StudyPlan) => void
   appendBlocks: (blocks: Block[]) => void
@@ -123,15 +130,18 @@ export const useStore = create<Store>((set, get) => {
    * Выбрасывать можно только СГЕНЕРИРОВАННЫЕ и ни разу не решённые задания: их
    * ничего не стоит создать заново. Всё, что ученик принёс сам, и всё, по чему
    * есть попытки (на них держится интервальное повторение), остаётся навсегда.
+   * Задания из скачанного варианта — тоже: вариант хранит только ссылки, и
+   * выброшенное задание оставило бы в работе дырку.
    */
   const pruneQuestions = (d: AppData, keepFresh = 400) => {
     const qs = d.questions ?? []
     if (qs.length <= keepFresh) return
     const answered = new Set((d.attempts ?? []).map((a) => a.questionId))
+    const inVariant = new Set((d.variants ?? []).flatMap((v) => v.questionIds))
     const keep: Question[] = []
     const spare: Question[] = []
     for (const q of qs) {
-      if (q.origin !== 'generated' || answered.has(q.id)) keep.push(q)
+      if (q.origin !== 'generated' || answered.has(q.id) || inVariant.has(q.id)) keep.push(q)
       else spare.push(q)
     }
     // Из нерешённых оставляем самые свежие — с ними ученик и работает сейчас.
@@ -385,6 +395,51 @@ export const useStore = create<Store>((set, get) => {
       set({ data: next, celebrations: celebs.length ? [...get().celebrations, ...celebs] : get().celebrations })
       persist(next)
     },
+    /**
+     * Положить скачанный вариант: задания уходят в общий банк, вариант хранит
+     * только их порядок. Повторная загрузка того же варианта его заменяет —
+     * иначе в списке накапливались бы одинаковые «Вариант 1».
+     */
+    addVariant: (v, fresh, questionIds, taskNos) =>
+      commit((d) => {
+        // Тот же вариант, скачанный заново, заменяет прежний, а не ложится
+        // рядом вторым «Вариантом 1». Его задания при этом надо убрать из
+        // банка — кроме тех, что ученик уже решал (на них держится повторение)
+        // и тех, что вошли в новый вариант.
+        const same = (d.variants ?? []).filter(
+          (x) => x.subjectId === v.subjectId && x.sourceId && x.sourceId === v.sourceId,
+        )
+        if (same.length) {
+          const answered = new Set((d.attempts ?? []).map((a) => a.questionId))
+          const stillUsed = new Set(questionIds)
+          for (const other of d.variants ?? []) {
+            if (!same.includes(other)) for (const id of other.questionIds) stillUsed.add(id)
+          }
+          const drop = new Set(
+            same.flatMap((x) => x.questionIds).filter((id) => !answered.has(id) && !stillUsed.has(id)),
+          )
+          if (drop.size) d.questions = (d.questions ?? []).filter((q) => !drop.has(q.id))
+        }
+
+        d.questions = [...(d.questions ?? []), ...fresh]
+        const variant: ExamVariant = {
+          id: uid('var_'),
+          subjectId: v.subjectId,
+          title: v.title,
+          sourceId: v.sourceId,
+          questionIds,
+          taskNos,
+          addedAt: new Date().toISOString(),
+        }
+        d.variants = [...(d.variants ?? []).filter((x) => !same.includes(x)), variant]
+        pruneQuestions(d)
+        return d
+      }),
+    removeVariant: (id) =>
+      commit((d) => {
+        d.variants = (d.variants ?? []).filter((v) => v.id !== id)
+        return d
+      }),
     dismissCelebration: (id) => set({ celebrations: get().celebrations.filter((c) => c.id !== id) }),
     setChatMsgs: (msgs) => set({ chatMsgs: msgs }),
 
