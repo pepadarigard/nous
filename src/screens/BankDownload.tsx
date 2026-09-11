@@ -74,9 +74,14 @@ export default function BankDownload({ onDone }: { onDone?: () => void }) {
       const sid = siteId(q)
       if (sid) reuse.set(sid, q.id)
     }
-    try {
-      for (const sid of chosen) {
-        if (abort.current.aborted) break
+    // Предметы качаются независимо: сайт живой и время от времени рвёт
+    // соединение, и осечка на физике не должна оставить ученика без русского.
+    // Поэтому ошибку ловим ВНУТРИ цикла и идём дальше, а список неудач
+    // показываем в конце.
+    const failed: string[] = []
+    for (const sid of chosen) {
+      if (abort.current.aborted) break
+      try {
         const qs = await downloadSubject(sid, {
           perTask,
           withImages,
@@ -115,9 +120,12 @@ export default function BankDownload({ onDone }: { onDone?: () => void }) {
           }
         }
         setAddedVars((a) => ({ ...a, [sid]: vars.length }))
+      } catch (e) {
+        failed.push(`${subjectName(sid)} — ${humanError(e)}`)
       }
-    } catch (e) {
-      setError(humanError(e))
+    }
+    if (failed.length) {
+      setError('Не всё скачалось: ' + failed.join('; ') + '. Нажми «Докачать» ещё раз — уже взятое не задвоится.')
     }
     setProg(null)
     setBusy(false)

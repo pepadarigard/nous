@@ -50,16 +50,41 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
  * а не «висит».
  */
 async function getPage(url: string): Promise<string> {
-  if (isTauri) return await invoke<string>('bank_get', { url })
-  const res = await fetch(url)
-  if (!res.ok) throw new Error('Сайт ответил ' + res.status)
-  return await res.text()
+  return retry(async () => {
+    if (isTauri) return await invoke<string>('bank_get', { url })
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Сайт ответил ' + res.status)
+    return await res.text()
+  })
+}
+
+/**
+ * Повтор после сетевой осечки.
+ *
+ * Проверка показала: из четырёх запросов подряд к сайту два могут оборваться
+ * на установке соединения, а те же самые адреса через секунду отвечают. Одна
+ * такая осечка не должна стоить ученику всей загрузки: за полный проход по
+ * четырём предметам запросов сотни, и хоть один сорвётся почти наверняка.
+ *
+ * Пауза растёт, чтобы не долбить сайт, который и так споткнулся.
+ */
+async function retry<T>(run: () => Promise<T>, times = 2): Promise<T> {
+  let last: unknown
+  for (let i = 0; i <= times; i++) {
+    try {
+      return await run()
+    } catch (e) {
+      last = e
+      if (i < times) await sleep(1200 * (i + 1))
+    }
+  }
+  throw last
 }
 
 /** Картинка-чертёж как data:URL. */
 async function getImage(url: string): Promise<string | null> {
   try {
-    if (isTauri) return await invoke<string>('bank_image', { url })
+    if (isTauri) return await retry(() => invoke<string>('bank_image', { url }))
     const res = await fetch(url)
     if (!res.ok) return null
     const blob = await res.blob()
