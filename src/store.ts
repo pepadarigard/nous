@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppConfig, AppData, Attempt, Block, ExamVariant, LessonBrief, Material, MockResult, PlanEvent, ProgressEvent, Question, ScheduleRules, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
+import type { AppConfig, AppData, Attempt, Block, ExamVariant, LessonBrief, Material, MistakeNote, MockResult, PlanEvent, ProgressEvent, Question, ScheduleRules, StudyPlan, SubjectGoal, SubjectSchedule } from './types'
 import { emptyData, emptyRules } from './types'
 import { generateStarterSet, bankKey } from './lib/taskgen'
 import { catchUpPlan } from './lib/schedule'
@@ -57,6 +57,7 @@ interface Store {
   removeQuestion: (id: string) => void
   recordAttempt: (a: Omit<Attempt, 'id' | 'at'>) => void
   recordMock: (m: Omit<MockResult, 'id' | 'at'>) => void
+  addMistake: (m: Omit<MistakeNote, 'id' | 'at'>) => void
   addVariant: (
     v: { subjectId: string; title: string; sourceId?: string },
     fresh: Question[],
@@ -315,6 +316,16 @@ export const useStore = create<Store>((set, get) => {
       commit((d) => {
         if (!d.mocks) d.mocks = []
         d.mocks.push({ ...m, id: uid('mk_'), at: new Date().toISOString() })
+        return d
+      }),
+
+    addMistake: (m) =>
+      commit((d) => {
+        if (!d.mistakes) d.mistakes = []
+        d.mistakes.push({ ...m, id: uid('ms_'), at: new Date().toISOString() })
+        // Разборы нужны, чтобы видеть ПОВТОРЫ, а не вести летопись: держим
+        // последние триста, дальше метка всё равно успела повториться.
+        if (d.mistakes.length > 300) d.mistakes = d.mistakes.slice(-300)
         return d
       }),
 

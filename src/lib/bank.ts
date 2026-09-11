@@ -5,6 +5,7 @@
 // что и человек. Развёрнутые ответы этим способом не проверяются — там нужен ИИ.
 
 import type { Attempt, Question } from '../types'
+import { taskSection } from '../data/egeTasks'
 
 // ---------- проверка ответа ----------
 
@@ -122,6 +123,49 @@ export function taskStats(attempts: Attempt[]): TaskStat[] {
 /** Слабые места: где решено меньше 70% при хотя бы трёх попытках. */
 export function weakSpots(attempts: Attempt[], limit = 5): TaskStat[] {
   return taskStats(attempts).filter((s) => s.total >= 3 && s.pct < 70).slice(0, limit)
+}
+
+/** Сводка по разделу курса. */
+export interface SectionStat {
+  subjectId: string
+  section: string
+  /** Номера этого раздела, по которым были попытки. */
+  tasks: number[]
+  total: number
+  correct: number
+  pct: number
+}
+
+/**
+ * Сводка по разделам курса, а не по номерам.
+ *
+ * Номер отвечает на вопрос «где сыплюсь», раздел — «чего не понимаю». Провал
+ * по двенадцатому заданию математики сам по себе не лечится: это графики
+ * функций, и чинить придётся вместе с девятым и семнадцатым — весь раздел
+ * «Начала анализа». Поэтому разбирать слабое место надо здесь.
+ */
+export function sectionStats(attempts: Attempt[]): SectionStat[] {
+  const map = new Map<string, SectionStat>()
+  for (const a of attempts) {
+    if (a.correct === null) continue
+    const section = taskSection(a.subjectId, a.taskNo)
+    if (!section) continue // номера нет в структуре — отнести некуда
+    const key = a.subjectId + '#' + section
+    let st = map.get(key)
+    if (!st) {
+      st = { subjectId: a.subjectId, section, tasks: [], total: 0, correct: 0, pct: 0 }
+      map.set(key, st)
+    }
+    st.total++
+    if (a.correct) st.correct++
+    if (a.taskNo && !st.tasks.includes(a.taskNo)) st.tasks.push(a.taskNo)
+  }
+  const out = [...map.values()]
+  for (const st of out) {
+    st.pct = st.total ? Math.round((st.correct / st.total) * 100) : 0
+    st.tasks.sort((a, b) => a - b)
+  }
+  return out.sort((a, b) => a.pct - b.pct || b.total - a.total)
 }
 
 /**

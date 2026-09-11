@@ -2,14 +2,17 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../store'
 import { SUBJECTS, subjectById } from '../data/subjects'
-import type { Attempt, Question } from '../types'
-import { fitsBlank, isCorrect, taskStats, trainingQueue } from '../lib/bank'
+import type { Attempt, MistakeNote, Question } from '../types'
+import { fitsBlank, isCorrect, sectionStats, taskStats, trainingQueue } from '../lib/bank'
 import { dueForReview } from '../lib/review'
 import { REVIEW_SESSION } from '../lib/today'
 import { canGenerate, generateTasks, generatedNumbers, bankKey } from '../lib/taskgen'
-import { isPart2, part2Label } from '../data/egeTasks'
+import { isPart2, part2Label, sectionsOf, taskSection } from '../data/egeTasks'
 import { todayISO } from '../lib/schedule'
-import { countOf } from '../lib/plural'
+import { countOf, plural } from '../lib/plural'
+import { explainMistake, type MistakeExplained } from '../lib/aiTutor'
+import { humanError } from '../lib/api'
+import { priorities, notMeasured, gapSummary } from '../lib/priority'
 import BankImport from './BankImport'
 import SolutionCheck from './SolutionCheck'
 import Mock from './Mock'
@@ -26,6 +29,7 @@ const selChip = { borderColor: 'var(--accent)', background: 'var(--accent-soft)'
 // из-за чего useMemo пересчитывался всегда, а селектор zustand дёргал перерисовку.
 const NO_QUESTIONS: Question[] = []
 const NO_ATTEMPTS: Attempt[] = []
+const NO_MISTAKES: MistakeNote[] = []
 
 export default function Trainer() {
   const data = useStore((s) => s.data)
@@ -133,6 +137,7 @@ function TrainTab({
   const [added, setAdded] = useState(0)
 
   const [subject, setSubject] = useState(initialSubject)
+  const [section, setSection] = useState('all')
   const [taskNo, setTaskNo] = useState<number | 'all'>(initialTaskNo)
   const [onlyWrong, setOnlyWrong] = useState(false)
   const [onlyDue, setOnlyDue] = useState(initialReview)
@@ -152,6 +157,7 @@ function TrainTab({
   const pool = useMemo(() => {
     let list = questions
     if (subject !== 'all') list = list.filter((q) => q.subjectId === subject)
+    if (section !== 'all') list = list.filter((q) => taskSection(q.subjectId, q.taskNo) === section)
     if (taskNo !== 'all') list = list.filter((q) => q.taskNo === taskNo)
     if (onlyWrong) {
       const bad = new Set(attempts.filter((a) => a.correct === false).map((a) => a.questionId))
@@ -161,12 +167,22 @@ function TrainTab({
       list = list.filter((q) => dueIds.has(q.id)).sort((a, b) => dueIds.get(a.id)! - dueIds.get(b.id)!)
     }
     return list
-  }, [questions, subject, taskNo, onlyWrong, onlyDue, dueIds, attempts])
+  }, [questions, subject, section, taskNo, onlyWrong, onlyDue, dueIds, attempts])
+
+  // Разделы показываем только по одному предмету: «Орфография» и «Механика» в
+  // одном ряду — это не выбор темы, а свалка.
+  const sections = useMemo(() => {
+    if (subject === 'all') return []
+    return sectionsOf(subject)
+      .map((s) => s.section)
+      .filter((name) => questions.some((q) => q.subjectId === subject && taskSection(subject, q.taskNo) === name))
+  }, [questions, subject])
 
   const taskNumbers = useMemo(() => {
-    const list = subject === 'all' ? questions : questions.filter((q) => q.subjectId === subject)
+    let list = subject === 'all' ? questions : questions.filter((q) => q.subjectId === subject)
+    if (section !== 'all') list = list.filter((q) => taskSection(q.subjectId, q.taskNo) === section)
     return [...new Set(list.map((q) => q.taskNo).filter((x): x is number => !!x))].sort((a, b) => a - b)
-  }, [questions, subject])
+  }, [questions, subject, section])
 
   // Задания генерируются, а не берутся из готового списка, поэтому кончиться не могут.
   // Догенерируем ровно под текущий фильтр: выбран номер — по нему, выбран предмет —
@@ -320,9 +336,14 @@ function TrainTab({
 
         {verdict === true && <div className="verdict ok"><Check size={16} /> Верно!</div>}
         {verdict === false && (
-          <div className="verdict bad">
-            <X size={16} /> Мимо.{q.answer ? <> Правильный ответ: <b>{q.answer.split('|')[0]}</b></> : null}
-          </div>
+          <>
+            <div className="verdict bad">
+              <X size={16} /> Мимо.{q.answer ? <> Правильный ответ: <b>{q.answer.split('|')[0]}</b></> : null}
+            </div>
+            {/* Правильный ответ ученик и так видит — от этого он ничему не
+                научился. Учит другое: в каком месте рассуждение свернуло не туда. */}
+            <MistakeBox question={q} given={given} />
+          </>
         )}
         {verdict === null && (
           <div className="verdict self">
@@ -381,6 +402,17 @@ function TrainTab({
           </div>
         ))}
       </div>
+      {/* Раздел курса. Выбирать тему полезнее, чем номер: «не понимаю производную»
+          — это девятое, двенадцатое и семнадцатое задания сразу, и разбирать их
+          надо вместе, а не поодиночке. */}
+      {sections.length > 0 && (
+        <div className="row wrap" style={{ gap: 6, marginBottom: 12 }}>
+          <div className="chip" style={{ cursor: 'pointer', ...(section === 'all' ? selChip : {}) }} onClick={() => { setSection('all'); setTaskNo('all') }}>Любая тема</div>
+          {sections.map((s) => (
+            <div key={s} className="chip" style={{ cursor: 'pointer', ...(section === s ? selChip : {}) }} onClick={() => { setSection(s); setTaskNo('all') }}>{s}</div>
+          ))}
+        </div>
+      )}
       {taskNumbers.length > 0 && (
         <div className="row wrap" style={{ gap: 6, marginBottom: 12 }}>
           <div className="chip" style={{ cursor: 'pointer', ...(taskNo === 'all' ? selChip : {}) }} onClick={() => setTaskNo('all')}>Любое задание</div>
@@ -419,6 +451,100 @@ function TrainTab({
       <p className="small muted" style={{ marginBottom: 0, marginTop: 12 }}>
         В подход берётся до {REVIEW_SESSION} заданий: сначала те, где ошибался, потом нерешённые.
       </p>
+    </div>
+  )
+}
+
+// ---------- Разбор ошибки ----------
+
+/**
+ * «Почему я ошибся» — то, ради чего вообще нужен ИИ в тренажёре.
+ *
+ * Нарочно НЕ запускается само. Во-первых, это запрос к модели на каждую ошибку
+ * — а ошибок за подход бывает десяток. Во-вторых, иногда ученик и сам видит,
+ * где промахнулся, и лишний текст тут только мешает. Кнопка — и разбор.
+ *
+ * Метка ошибки сохраняется: из повторов видно, что дело не в невнимательности.
+ */
+function MistakeBox({ question, given }: { question: Question; given: string }) {
+  const cfg = useStore((s) => s.data.config)
+  const mistakes = useStore((s) => s.data.mistakes ?? NO_MISTAKES)
+  const addMistake = useStore((s) => s.addMistake)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [got, setGot] = useState<MistakeExplained | null>(null)
+
+  // Сколько раз эта же ошибка уже была — считаем ПОСЛЕ разбора, по его метке.
+  const repeats = got ? mistakes.filter((m) => m.kind === got.kind).length : 0
+
+  async function run() {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const res = await explainMistake(cfg, {
+        subjectId: question.subjectId,
+        taskNo: question.taskNo,
+        task: question.text,
+        expected: question.answer ?? '',
+        given,
+        solution: question.solution,
+      })
+      setGot(res)
+      addMistake({
+        subjectId: question.subjectId,
+        taskNo: question.taskNo,
+        questionId: question.id,
+        kind: res.kind,
+        why: res.why,
+        remember: res.remember,
+        uncertain: res.uncertain,
+        model: cfg.textModel,
+      })
+    } catch (e) {
+      setError(humanError(e))
+    }
+    setBusy(false)
+  }
+
+  if (got) {
+    return (
+      <div className="card soft" style={{ marginTop: 10 }}>
+        <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+          <Lightbulb size={16} color="var(--accent)" />
+          <b>{got.kind}</b>
+          {repeats > 1 && (
+            <span className="chip" style={{ borderColor: 'var(--warn)', color: 'var(--warn)' }}>
+              уже {repeats}-й раз
+            </span>
+          )}
+        </div>
+        <div className="sol-body">{got.why}</div>
+        {got.remember && (
+          <div className="small" style={{ marginTop: 8 }}>
+            <b>Запомни:</b> {got.remember}
+          </div>
+        )}
+        {got.uncertain && (
+          <div className="small muted" style={{ marginTop: 6 }}>
+            По твоему ответу трудно понять ход мысли — разбор мог промахнуться.
+          </div>
+        )}
+        {repeats > 2 && (
+          <div className="small" style={{ marginTop: 8, color: 'var(--warn)' }}>
+            Это уже не невнимательность. Разбери тему целиком: вкладка «Что решаем» → нужный раздел.
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button className="btn btn-sm" onClick={run} disabled={busy}>
+        <Lightbulb size={14} /> {busy ? 'Разбираю…' : 'Почему я ошибся'}
+      </button>
+      {error && <span className="small" style={{ color: 'var(--danger)', marginLeft: 10 }}>{error}</span>}
     </div>
   )
 }
@@ -497,9 +623,40 @@ function BankTab({ questions }: { questions: Question[] }) {
 
 // ---------- Статистика ----------
 
+
+/**
+ * Статистика отвечает на три разных вопроса, и путать их нельзя.
+ *
+ *  1. «Что подтянуть первым» — цена балла. Считается арифметикой: вес номера
+ *     на экзамене умножить на долю, которую ты в нём теряешь. Вторая часть
+ *     делится на трудоёмкость, иначе список всегда советовал бы сочинение.
+ *  2. «Чего я не понимаю» — разделы курса. Провал в одном номере — случайность,
+ *     провал в разделе — непонятая тема.
+ *  3. «Что я делаю не так» — повторяющиеся ошибки из разборов.
+ *
+ * Номера остаются внизу, как деталь: по ним видно частности, но решения по ним
+ * не принимают.
+ */
 function StatsTab() {
   const attempts = useStore((s) => s.data.attempts ?? NO_ATTEMPTS)
+  const mistakes = useStore((s) => s.data.mistakes ?? NO_MISTAKES)
   const stats = useMemo(() => taskStats(attempts), [attempts])
+  const sections = useMemo(() => sectionStats(attempts), [attempts])
+
+  // Повторы ошибок: одна и та же метка два раза и больше.
+  const repeated = useMemo(() => {
+    const map = new Map<string, { kind: string; count: number; last: MistakeNote }>()
+    for (const m of mistakes) {
+      const cur = map.get(m.kind)
+      if (cur) {
+        cur.count++
+        if (m.at > cur.last.at) cur.last = m
+      } else {
+        map.set(m.kind, { kind: m.kind, count: 1, last: m })
+      }
+    }
+    return [...map.values()].filter((x) => x.count > 1).sort((a, b) => b.count - a.count)
+  }, [mistakes])
 
   if (!attempts.length) {
     return (
@@ -510,43 +667,149 @@ function StatsTab() {
     )
   }
 
-  const bySubject = new Map<string, typeof stats>()
-  for (const st of stats) {
-    const arr = bySubject.get(st.subjectId) ?? []
-    arr.push(st)
-    bySubject.set(st.subjectId, arr)
-  }
+  const subjects = [...new Set(stats.map((s) => s.subjectId))]
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      {[...bySubject.entries()].map(([sid, rows]) => {
+      {/* 1. Что подтянуть первым */}
+      {subjects.map((sid) => {
+        const list = priorities(attempts, sid).slice(0, 5)
+        const gaps = gapSummary(attempts, sid)
+        const blind = notMeasured(attempts, sid)
+        if (!list.length && !blind.length) return null
+        const s = subjectById(sid)
+        return (
+          <div className="card" key={'prio_' + sid}>
+            <div className="row" style={{ marginBottom: 4 }}>
+              <h3 style={{ margin: 0 }}>{s?.emoji} Что подтянуть первым</h3>
+              <div className="spacer" />
+              <span className="chip">{s?.short ?? sid}</span>
+            </div>
+            <p className="small muted" style={{ marginTop: 4 }}>
+              {gaps.total >= 1 ? (
+                <>
+                  Сейчас ты теряешь примерно <b>{Math.round(gaps.total)}</b>{' '}
+                  {plural(Math.round(gaps.total), ['первичный балл', 'первичных балла', 'первичных баллов'])}, из них{' '}
+                  <b>{Math.round(gaps.top)}</b> — в трёх номерах сверху списка. Задания второй части стоят
+                  дороже, но и берутся дольше, поэтому в порядке они учтены с поправкой на трудоёмкость.
+                </>
+              ) : (
+                <>Потерь почти нет — по измеренным номерам ты берёшь почти всё.</>
+              )}
+            </p>
+            {list.map((p) => (
+              <div className="row wrap" key={p.taskNo} style={{ gap: 10, padding: '8px 0', borderTop: '1px solid var(--line)' }}>
+                <b style={{ minWidth: 40 }}>№{p.taskNo}</b>
+                <span className="small" style={{ flex: 1, minWidth: 180 }}>
+                  {p.title}
+                  {p.part2 && <span className="muted"> · вторая часть</span>}
+                </span>
+                <span className="small muted" style={{ width: 108, textAlign: 'right' }}>
+                  берёшь {Math.round(p.rate * 100)}% из {p.tries}
+                </span>
+                {/* Дробное число по-русски всегда «балла»: «ноль целых восемь
+                    десятых балла». Склонять по округлению нельзя — выходило
+                    «+0.8 балл». */}
+                <span className="small" style={{ width: 96, textAlign: 'right', color: 'var(--accent-text)' }}>
+                  +{p.gap.toFixed(1).replace('.', ',')} балла
+                </span>
+              </div>
+            ))}
+            {blind.length > 0 && (
+              <p className="small muted" style={{ marginTop: 10, marginBottom: 0 }}>
+                Ещё не мерили: {blind.map((n) => '№' + n).join(', ')}. По ним счёт не ведётся — сначала
+                прорешай по несколько штук, иначе список выше судит по половине работы.
+              </p>
+            )}
+          </div>
+        )
+      })}
+
+      {/* 2. Чего не понимаю — по разделам */}
+      {subjects.map((sid) => {
+        const rows = sections.filter((x) => x.subjectId === sid)
+        if (!rows.length) return null
+        const s = subjectById(sid)
+        return (
+          <div className="card" key={'sec_' + sid}>
+            <div className="row" style={{ marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>{s?.emoji} Темы: {s?.name ?? sid}</h3>
+              <div className="spacer" />
+              <span className="small muted">раздел важнее номера</span>
+            </div>
+            {rows.map((r) => (
+              <div className="row wrap" key={r.section} style={{ gap: 12, padding: '6px 0' }}>
+                <span style={{ width: 190, minWidth: 140 }} className="small">{r.section}</span>
+                <div className="pbar" style={{ flex: 1, minWidth: 100 }}>
+                  <span style={{ width: r.pct + '%', background: r.pct >= 80 ? 'var(--success)' : r.pct >= 50 ? 'var(--warn)' : 'var(--danger)' }} />
+                </div>
+                <span className="small" style={{ width: 92, textAlign: 'right' }}>
+                  {r.pct}% ({r.correct}/{r.total})
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      })}
+
+      {/* 3. Что я делаю не так */}
+      {repeated.length > 0 && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Повторяющиеся ошибки</h3>
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Одно и то же второй раз — уже не случайность. Это разборы, которые ты запрашивал в
+            тренажёре кнопкой «Почему я ошибся».
+          </p>
+          {repeated.map((r) => (
+            <div key={r.kind} style={{ padding: '9px 0', borderTop: '1px solid var(--line)' }}>
+              <div className="row wrap" style={{ gap: 8 }}>
+                <b style={{ flex: 1, minWidth: 160 }}>{r.kind}</b>
+                <span
+                  className="chip"
+                  style={r.count > 2 ? { borderColor: 'var(--danger)', color: 'var(--danger)' } : undefined}
+                >
+                  {countOf(r.count, ['раз', 'раза', 'раз'])}
+                </span>
+                {r.last.taskNo ? <span className="small muted">№{r.last.taskNo}</span> : null}
+              </div>
+              {r.last.remember && <div className="small muted" style={{ marginTop: 4 }}>{r.last.remember}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 4. Подробности по номерам */}
+      {subjects.map((sid) => {
+        const rows = stats.filter((x) => x.subjectId === sid)
         const s = subjectById(sid)
         const total = rows.reduce((n, r) => n + r.total, 0)
         const correct = rows.reduce((n, r) => n + r.correct, 0)
         return (
-          <div className="card" key={sid}>
-            <div className="row" style={{ marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>{s?.emoji} {s?.name ?? sid}</h3>
+          <details className="card" key={'no_' + sid}>
+            <summary className="row" style={{ cursor: 'pointer' }}>
+              <b>{s?.emoji} Подробно по номерам: {s?.short ?? sid}</b>
               <div className="spacer" />
               <span className="chip">{correct} из {total} верно</span>
-            </div>
-            {rows
-              .slice()
-              .sort((a, b) => (a.taskNo ?? 99) - (b.taskNo ?? 99))
-              .map((r) => (
-                <div className="row" key={String(r.taskNo)} style={{ gap: 12, padding: '6px 0' }}>
-                  <span style={{ width: 96 }} className="small">
-                    {r.taskNo ? 'Задание №' + r.taskNo : 'Без номера'}
-                  </span>
-                  <div className="pbar" style={{ flex: 1 }}>
-                    <span style={{ width: r.pct + '%', background: r.pct >= 80 ? 'var(--success)' : r.pct >= 50 ? 'var(--warn)' : 'var(--danger)' }} />
+            </summary>
+            <div style={{ marginTop: 10 }}>
+              {rows
+                .slice()
+                .sort((a, b) => (a.taskNo ?? 99) - (b.taskNo ?? 99))
+                .map((r) => (
+                  <div className="row" key={String(r.taskNo)} style={{ gap: 12, padding: '6px 0' }}>
+                    <span style={{ width: 96 }} className="small">
+                      {r.taskNo ? 'Задание №' + r.taskNo : 'Без номера'}
+                    </span>
+                    <div className="pbar" style={{ flex: 1 }}>
+                      <span style={{ width: r.pct + '%', background: r.pct >= 80 ? 'var(--success)' : r.pct >= 50 ? 'var(--warn)' : 'var(--danger)' }} />
+                    </div>
+                    <span className="small" style={{ width: 92, textAlign: 'right' }}>
+                      {r.pct}% ({r.correct}/{r.total})
+                    </span>
                   </div>
-                  <span className="small" style={{ width: 92, textAlign: 'right' }}>
-                    {r.pct}% ({r.correct}/{r.total})
-                  </span>
-                </div>
-              ))}
-          </div>
+                ))}
+            </div>
+          </details>
         )
       })}
     </div>

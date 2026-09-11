@@ -99,6 +99,86 @@ export async function checkSolution(cfg: AppConfig, input: CheckInput): Promise<
   }
 }
 
+// ---------- 1б. Разбор ошибки ----------
+
+export interface MistakeInput {
+  subjectId: string
+  taskNo?: number
+  /** Условие задания. */
+  task: string
+  /** Эталонный ответ. */
+  expected: string
+  /** Что написал ученик. */
+  given: string
+  /** Авторский разбор, если он есть, — по нему видно правильный ход мысли. */
+  solution?: string
+}
+
+export interface MistakeExplained {
+  why: string
+  kind: string
+  remember: string
+  uncertain?: boolean
+}
+
+/**
+ * Разобрать конкретную ошибку: не «правильный ответ 6», а где сломалось.
+ *
+ * Правильный ответ ученик и так видит — от этого он не научился ничему. Учит
+ * другое: в каком месте рассуждение свернуло не туда. Поэтому модели даётся
+ * всё, что есть (условие, эталон, авторский разбор, ответ ученика), и просится
+ * ровно три вещи: где сломалось, как это назвать одним оборотом и что
+ * запомнить.
+ *
+ * Короткая метка "kind" нужна не для красоты: по ней считаются ПОВТОРЫ. Одна и
+ * та же ошибка в третий раз — это уже не невнимательность, а непонятая тема, и
+ * приложение должно это заметить раньше ученика.
+ */
+export async function explainMistake(cfg: AppConfig, input: MistakeInput): Promise<MistakeExplained> {
+  if (isMock()) {
+    return {
+      why: 'В браузере ИИ выключен — это демонстрация. В приложении здесь будет разбор твоей ошибки.',
+      kind: 'демо-разбор',
+      remember: 'Запусти Nous, чтобы получить настоящий разбор.',
+    }
+  }
+
+  const title = taskTitle(input.subjectId, input.taskNo)
+  const system =
+    'Ты — репетитор по предмету «' + subjectName(input.subjectId) + '». Ученик ошибся в задании ЕГЭ. ' +
+    'Твоя задача — НЕ повторять правильный ответ (ученик его уже видит), а понять, где именно сломалось его рассуждение, ' +
+    'и назвать это так, чтобы он узнал свою ошибку в следующий раз.\n\n' +
+    HONESTY + ' Если по ответу ученика невозможно понять ход его мысли (например, он написал случайное число ' +
+    'или не отвечал) — так и скажи и поставь "uncertain": true, не придумывай за него рассуждение.\n\n' +
+    'Отвечай ТОЛЬКО JSON:\n' +
+    '{"why": "где сломалось рассуждение, 1–3 предложения, обращайся на ты", ' +
+    '"kind": "тип ошибки одним оборотом в 2–5 слов, без точки, в именительном падеже: например «перепутал площадь и периметр»", ' +
+    '"remember": "одно короткое правило, которое не даст повторить эту ошибку", ' +
+    '"uncertain": true|false}\n' +
+    'По-русски, без LaTeX, без вступлений и без похвалы.'
+
+  const user =
+    'ПРЕДМЕТ: ' + subjectName(input.subjectId) + '\n' +
+    (input.taskNo ? 'ЗАДАНИЕ № ' + input.taskNo + (title ? ' (' + title + ')' : '') + '\n' : '') +
+    '\nУСЛОВИЕ:\n' + input.task.slice(0, 3000) +
+    '\n\nВЕРНЫЙ ОТВЕТ: ' + input.expected +
+    '\nОТВЕТ УЧЕНИКА: ' + (input.given.trim() || '(не отвечал)') +
+    (input.solution ? '\n\nАВТОРСКИЙ РАЗБОР:\n' + input.solution.slice(0, 3000) : '')
+
+  const raw = await callJSON(cfg, { system, user, temperature: 0.2, maxTokens: 700 })
+  const why = cleanMath(String(raw?.why ?? '')).trim()
+  if (!why) throw new Error('Модель не разобрала ошибку — попробуй ещё раз.')
+  return {
+    why,
+    // Метку приводим к нижнему регистру и режем: она нужна для сравнения
+    // повторов, а не для чтения вслух. Без этого «Перепутал знак» и
+    // «перепутал знак» считались бы разными ошибками.
+    kind: cleanMath(String(raw?.kind ?? '')).trim().toLowerCase().replace(/[.!]+$/, '').slice(0, 60) || 'ошибка',
+    remember: cleanMath(String(raw?.remember ?? '')).trim(),
+    uncertain: !!raw?.uncertain,
+  }
+}
+
 /** Найти в тексте материала кусок с критериями оценивания — чтобы проверка шла по ним. */
 export function findCriteria(text: string, taskNo?: number): string | undefined {
   const low = text.toLowerCase()

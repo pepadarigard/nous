@@ -123,6 +123,32 @@ export interface SolutionReview {
   model?: string
 }
 
+/**
+ * Разбор одной ошибки.
+ *
+ * Смысл не в том, чтобы показать правильный ответ — его видно и так. Смысл в
+ * том, ГДЕ сломалось рассуждение: «взял площадь вместо периметра», «потерял
+ * второй корень при отборе». Это и отличает занятие с репетитором от
+ * нарешивания, и это же копится в типологию: если одна и та же метка выпадает
+ * третий раз, дело не в невнимательности, а в непонятой теме.
+ */
+export interface MistakeNote {
+  id: string
+  at: string
+  subjectId: string
+  taskNo?: number
+  questionId: string
+  /** Короткая метка типа ошибки — по ней считаются повторы. */
+  kind: string
+  /** Где именно сломалось рассуждение. */
+  why: string
+  /** Что запомнить, чтобы не повторить. */
+  remember: string
+  /** Модель честно не уверена — показать это ученику. */
+  uncertain?: boolean
+  model?: string
+}
+
 /** Материал занятия, подготовленный ИИ и сохранённый в само занятие (дальше работает офлайн). */
 export interface LessonBrief {
   theory: string // краткая теория в markdown
@@ -277,6 +303,7 @@ export interface AppData {
   questions?: Question[] // личный банк заданий
   attempts?: Attempt[] // история решений
   mocks?: MockResult[] // результаты пробников
+  mistakes?: MistakeNote[] // разборы своих ошибок — из них видно, что повторяется
   variants?: ExamVariant[] // скачанные целые варианты экзамена
   events?: PlanEvent[] // свои дела в календаре
   rules?: ScheduleRules // выходные, каникулы, потолок занятий в день
@@ -297,6 +324,7 @@ export function emptyData(): AppData {
     questions: [],
     attempts: [],
     mocks: [],
+    mistakes: [],
     variants: [],
     events: [],
     rules: emptyRules(),

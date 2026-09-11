@@ -126,11 +126,23 @@ export function taskPoints(subjectId: string, taskNo: number): number {
 /**
  * Первичный балл → тестовый. Дробный первичный округляем вниз: обещать балл,
  * который ещё не набран, — то же враньё, только вежливое.
+ *
+ * Шкала перевода публикуется позже структуры, и у профильной математики они
+ * разъехались: структура 2027 года даёт максимум 33 первичных, а последняя
+ * опубликованная шкала рассчитана на 32. Просто обрезать лишнее нельзя — тогда
+ * 30, 31, 32 и 33 балла все показывали бы сотню, хотя по настоящей шкале сотня
+ * начинается только на максимуме. Поэтому короткую шкалу РАСТЯГИВАЕМ на
+ * фактический максимум: это приближение, но оно сохраняет форму кривой и не
+ * дарит ученику баллы, которых он не набрал. Когда ФИПИ выпустит шкалу 2027
+ * года, растягивание отключится само — предупреждение в checkScoring() об этом
+ * и напоминает.
  */
 export function toTestScore(subjectId: string, primary: number): number {
   const s = SCORING[subjectId]
   if (!s) return 0
-  const i = Math.max(0, Math.min(s.toTest.length - 1, Math.floor(primary)))
+  const last = s.toTest.length - 1
+  const scaled = last < s.maxPrimary ? (primary * last) / s.maxPrimary : primary
+  const i = Math.max(0, Math.min(last, Math.floor(scaled)))
   return s.toTest[i]
 }
 
@@ -143,7 +155,11 @@ export function primaryForTest(subjectId: string, test: number): number {
   const s = SCORING[subjectId]
   if (!s) return 0
   const i = s.toTest.findIndex((t) => t >= test)
-  return i < 0 ? s.maxPrimary : i
+  if (i < 0) return s.maxPrimary
+  // Обратный ход того же растягивания, что и в toTestScore, — иначе порог
+  // «сдать на 39» считался бы по одной шкале, а показывался по другой.
+  const last = s.toTest.length - 1
+  return last < s.maxPrimary ? Math.ceil((i * s.maxPrimary) / last) : i
 }
 
 /**
