@@ -13,7 +13,10 @@ use tauri::Manager;
 /// блокировка по адресу, ключ и заголовки тут ни при чём. Из списка их всё
 /// равно не убираем: у кого-то есть VPN, и тогда они работают.
 fn allowed_api(url: &str) -> bool {
-    const ALLOWED: [&str; 17] = [
+    const ALLOWED: [&str; 20] = [
+        "https://foundation-models.api.cloud.ru/",
+        "https://api.vsegpt.ru/",
+        "https://api.proxyapi.ru/",
         "https://generativelanguage.googleapis.com/",
         "https://router.huggingface.co/",
         "https://api.together.xyz/",

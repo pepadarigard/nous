@@ -36,6 +36,54 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     defaultModel: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
   },
   /**
+   * Cloud.ru — российское облако, и самый удобный способ добраться до
+   * GigaChat.
+   *
+   * У самого GigaChat два препятствия: он требует корневой сертификат
+   * Минцифры (в обычной Windows его нет) и авторизацию через OAuth с
+   * обменом ключа на получасовой токен. Cloud.ru отдаёт те же модели
+   * GigaChat по обычному ключу и обычному OpenAI-совместимому адресу.
+   *
+   * Плюс к ним там Qwen3-VL-235B — та самая, что у нас прошла все проверки,
+   * — и ретранслированные модели OpenAI. Адрес доходит из России напрямую.
+   */
+  cloudru: {
+    id: 'cloudru',
+    name: 'Cloud.ru',
+    base: 'https://foundation-models.api.cloud.ru/v1',
+    keysUrl: 'https://console.cloud.ru',
+    keyPrefix: '',
+    hint: 'российское облако: GigaChat, Qwen3-VL со зрением, модели OpenAI. Работает из России напрямую',
+    defaultModel: 'qwen/qwen3-vl-235b-a22b-instruct',
+  },
+  /**
+   * VseGPT — российский агрегатор: один ключ, 463 модели, включая GPT, Claude
+   * и Gemini. Платный, но доступен из России напрямую и без VPN — то есть
+   * решает ровно ту задачу, ради которой иначе нужен VPN.
+   */
+  vsegpt: {
+    id: 'vsegpt',
+    name: 'VseGPT',
+    base: 'https://api.vsegpt.ru/v1',
+    keysUrl: 'https://vsegpt.ru',
+    keyPrefix: 'sk-',
+    hint: 'российский агрегатор: 463 модели, включая GPT и Claude. Платный, но работает без VPN',
+    defaultModel: 'openai/gpt-4o-mini',
+  },
+  /**
+   * ProxyAPI — российский ретранслятор к OpenAI и Anthropic. Тоже платный,
+   * тоже доступен напрямую.
+   */
+  proxyapi: {
+    id: 'proxyapi',
+    name: 'ProxyAPI',
+    base: 'https://api.proxyapi.ru/openai/v1',
+    keysUrl: 'https://proxyapi.ru',
+    keyPrefix: 'sk-',
+    hint: 'российский ретранслятор OpenAI и Anthropic; платный, работает без VPN',
+    defaultModel: 'gpt-4o-mini',
+  },
+  /**
    * Google Gemini. Зрение есть, бесплатный лимит самый щедрый из найденных.
    *
    * НО из России он не работает, и вот в чём была моя ошибка: адрес отвечает,
@@ -216,7 +264,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
 /** Порядок показа в интерфейсе (лучшие для России — первыми). */
 // Порядок проверен живыми запросами с российского адреса: сначала то, что
 // реально доходит, в конце — заблокированное по стране.
-export const PROVIDER_ORDER: Provider[] = ['modelscope', 'huggingface', 'together', 'dashscope', 'sambanova', 'mistral', 'ollama', 'lmstudio', 'siliconflow', 'zhipu', 'deepinfra', 'gemini', 'openrouter', 'cerebras', 'groq', 'nvidia', 'novita', 'github']
+export const PROVIDER_ORDER: Provider[] = ['modelscope', 'cloudru', 'huggingface', 'together', 'dashscope', 'sambanova', 'mistral', 'ollama', 'lmstudio', 'siliconflow', 'zhipu', 'deepinfra', 'vsegpt', 'proxyapi', 'gemini', 'openrouter', 'cerebras', 'groq', 'nvidia', 'novita', 'github']
 
 /** Локальные провайдеры: работают без ключа и без интернета. */
 export const LOCAL_PROVIDERS: Provider[] = ['ollama', 'lmstudio']
