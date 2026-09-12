@@ -25,6 +25,30 @@ function isRateLimit(e: unknown): boolean {
   return m.includes('rate limit') || m.includes('429') || m.includes('too many') || m.includes('rate_limit')
 }
 
+/**
+ * Связь оборвалась по дороге, а не сервис отказал.
+ *
+ * Измерено на российском интернете: из двенадцати запросов подряд к Mistral
+ * два обрывались на установке соединения, и те же запросы через секунду
+ * проходили. Показывать ученику «не получилось» из-за такой осечки нельзя —
+ * он решит, что сломано приложение.
+ */
+function isNetworkHiccup(e: unknown): boolean {
+  const m = String((e as any)?.message ?? e).toLowerCase()
+  return (
+    m.includes('econnreset') ||
+    m.includes('connection reset') ||
+    m.includes('failed to fetch') ||
+    m.includes('network') ||
+    m.includes('timed out') ||
+    m.includes('timeout') ||
+    m.includes('eof') ||
+    m.includes('502') ||
+    m.includes('503') ||
+    m.includes('504')
+  )
+}
+
 async function groqRawRetry(cfg: AppConfig, body: GroqBody): Promise<any> {
   let last: unknown
   for (let i = 0; i < 3; i++) {
@@ -32,8 +56,10 @@ async function groqRawRetry(cfg: AppConfig, body: GroqBody): Promise<any> {
       return await groqRaw(activeKey(cfg), body, cfg.provider ?? 'groq')
     } catch (e) {
       last = e
-      if (isRateLimit(e) && i < 2) {
-        await sleep(4500)
+      if (i < 2 && (isRateLimit(e) || isNetworkHiccup(e))) {
+        // Лимиту нужна долгая пауза, оборванной связи — короткая: ждать пять
+        // секунд там, где помогает одна, значит зря морозить ученика.
+        await sleep(isRateLimit(e) ? 4500 : 1200 * (i + 1))
         continue
       }
       throw e
@@ -220,7 +246,11 @@ export async function callJSON(cfg: AppConfig, opts: CallOpts): Promise<any> {
   for (const body of attempts) {
     try {
       const resp = await groqRawRetry(cfg, body)
-      const c: string = resp?.choices?.[0]?.message?.content ?? ''
+      const msg = resp?.choices?.[0]?.message ?? {}
+      // Рассуждающие модели иногда кладут весь ответ в reasoning_content, а
+      // content оставляют пустым. Выбросить такой ответ — значит выбросить
+      // готовую работу: JSON в размышлениях обычно есть, его просто надо взять.
+      const c: string = String(msg.content ?? '').trim() || String(msg.reasoning_content ?? '').trim()
       if (!c.trim()) {
         lastErr = new Error('Пустой ответ ИИ')
         continue

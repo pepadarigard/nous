@@ -25,7 +25,8 @@ export default function Onboarding() {
   // только при подключённом ИИ — иначе он пропускается и точка врала бы.
   const dotSteps = STEPS.filter((s) => s !== 'welcome' && (s !== 'questions' || aiReady(store.data.config)))
 
-  // OpenRouter по умолчанию — работает в России без VPN.
+  // ModelScope по умолчанию: проверено запросами с российского адреса —
+  // доходит, а OpenRouter отвечает 403.
   const [prov, setProv] = useState<Provider>(normProvider(store.data.config.provider))
   const [keys, setKeys] = useState<Record<Provider, string>>(
     () => Object.fromEntries(PROVIDER_ORDER.map((p) => [p, keyOf(store.data.config, p)])) as Record<Provider, string>,

@@ -277,6 +277,8 @@ export interface ProgressEvent {
 export type Provider =
   | 'ollama'
   | 'lmstudio'
+  | 'modelscope'
+  | 'mistral'
   | 'groq'
   | 'openrouter'
   | 'cerebras'

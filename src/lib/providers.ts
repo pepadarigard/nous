@@ -14,6 +14,41 @@ export interface ProviderInfo {
 }
 
 export const PROVIDERS: Record<Provider, ProviderInfo> = {
+  /**
+   * ModelScope — лучший вариант из проверенных на российском интернете.
+   *
+   * ВАЖНО про адрес: у сервиса два домена, и работает НЕ тот, что в их
+   * документации. api-inference.modelscope.cn отвечает «Authentication
+   * failed» на верный токен, а api-inference.modelscope.ai с тем же токеном
+   * отвечает 200. Проверено перебором.
+   *
+   * Что там есть: Qwen3-VL-235B (умная И со зрением — решает задачи ЕГЭ,
+   * держит строгий JSON, читает фото листа) и DeepSeek-V4-Pro. Бесплатная
+   * квота — около двух тысяч вызовов в день.
+   */
+  modelscope: {
+    id: 'modelscope',
+    name: 'ModelScope',
+    base: 'https://api-inference.modelscope.ai/v1',
+    keysUrl: 'https://modelscope.cn/my/myaccesstoken',
+    keyPrefix: 'ms-',
+    hint: 'работает из России; Qwen3-VL-235B — умная и со зрением; ~2000 вызовов в день бесплатно',
+    defaultModel: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
+  },
+  /**
+   * Mistral — запасной, тоже доходит из России. На бесплатном тарифе доступны
+   * только небольшие модели (ministral 8B/14B, pixtral-12b): зрение есть,
+   * но задачи ЕГЭ они решают плохо. Годится как подстраховка, не как основной.
+   */
+  mistral: {
+    id: 'mistral',
+    name: 'Mistral',
+    base: 'https://api.mistral.ai/v1',
+    keysUrl: 'https://console.mistral.ai/api-keys',
+    keyPrefix: '',
+    hint: 'работает из России; на бесплатном тарифе модели небольшие',
+    defaultModel: 'ministral-14b-latest',
+  },
   ollama: {
     id: 'ollama',
     name: 'Ollama (локально)',
@@ -38,7 +73,10 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://openrouter.ai/api/v1',
     keysUrl: 'https://openrouter.ai/settings/keys',
     keyPrefix: 'sk-or-',
-    hint: 'работает в России без VPN; бесплатные модели',
+    // Проверено запросом с российского адреса: сервис отвечает 403 «Access
+    // denied by security policy» независимо от заголовков. Это блокировка по
+    // адресу, ключ тут ни при чём — и обойти её со стороны приложения нельзя.
+    hint: 'из России НЕ работает: блокирует по адресу (403). Нужен VPN',
     defaultModel: 'openai/gpt-oss-120b:free',
   },
   siliconflow: {
@@ -116,7 +154,9 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
 }
 
 /** Порядок показа в интерфейсе (лучшие для России — первыми). */
-export const PROVIDER_ORDER: Provider[] = ['openrouter', 'ollama', 'lmstudio', 'siliconflow', 'zhipu', 'cerebras', 'nvidia', 'deepinfra', 'novita', 'github', 'groq']
+// Порядок проверен живыми запросами с российского адреса: сначала то, что
+// реально доходит, в конце — заблокированное по стране.
+export const PROVIDER_ORDER: Provider[] = ['modelscope', 'mistral', 'ollama', 'lmstudio', 'siliconflow', 'zhipu', 'nvidia', 'deepinfra', 'novita', 'github', 'openrouter', 'cerebras', 'groq']
 
 /** Локальные провайдеры: работают без ключа и без интернета. */
 export const LOCAL_PROVIDERS: Provider[] = ['ollama', 'lmstudio']
@@ -144,9 +184,17 @@ export const OR_FALLBACK_MODELS = [
 /** Списка моделей у GitHub Models через /models нет — известный набор. */
 export const GITHUB_MODELS = ['openai/gpt-4o', 'openai/gpt-4o-mini', 'deepseek/DeepSeek-V3', 'meta/Llama-3.3-70B-Instruct']
 
-/** Старые/неизвестные значения провайдера из конфига приводим к валидному. */
+/**
+ * Старые/неизвестные значения провайдера из конфига приводим к валидному.
+ *
+ * По умолчанию ModelScope, а не OpenRouter, как было раньше: проверка живыми
+ * запросами показала, что OpenRouter отвечает российским адресам 403. Ставить
+ * по умолчанию то, что заведомо не работает, — значит встречать нового
+ * ученика неработающим ИИ. Тех, кто выбрал провайдера сам, это не трогает: у
+ * них значение в конфиге записано явно.
+ */
 export function normProvider(p?: string): Provider {
-  return p && (PROVIDERS as Record<string, ProviderInfo>)[p] ? (p as Provider) : 'openrouter'
+  return p && (PROVIDERS as Record<string, ProviderInfo>)[p] ? (p as Provider) : 'modelscope'
 }
 
 export function providerOf(cfg: AppConfig): ProviderInfo {

@@ -6,9 +6,19 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::Manager;
 
-/// Разрешённые сервисы ИИ (все OpenAI-совместимые). Кроме Groq — работают в РФ без VPN.
+/// Разрешённые сервисы ИИ (все OpenAI-совместимые).
+///
+/// Проверено живыми запросами с российского адреса: ModelScope и Mistral
+/// отвечают напрямую, а OpenRouter, Groq и Cerebras возвращают 403 —
+/// блокировка по адресу, ключ и заголовки тут ни при чём. Из списка их всё
+/// равно не убираем: у кого-то есть VPN, и тогда они работают.
 fn allowed_api(url: &str) -> bool {
-    const ALLOWED: [&str; 9] = [
+    const ALLOWED: [&str; 12] = [
+        // Домен именно .ai: одноимённый .cn на верный токен отвечает
+        // «Authentication failed». Проверено перебором.
+        "https://api-inference.modelscope.ai/",
+        "https://api-inference.modelscope.cn/",
+        "https://api.mistral.ai/",
         "https://api.groq.com/",
         "https://openrouter.ai/",
         "https://api.cerebras.ai/",

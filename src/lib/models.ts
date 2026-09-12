@@ -13,6 +13,10 @@ export interface ModelInfo {
 // Reasoning/code/vision-варианты уже отсеяны EXCLUDE — сюда попадают только обычные chat/instruct.
 // Паттерны устойчивы к версиям (V3→V4, GLM-4→GLM-5, Qwen3→Qwen3.6) и к именам всех провайдеров.
 const PRIORITY: ModelInfo[] = [
+  // Проверено живыми запросами с российского адреса: решает задачу ЕГЭ,
+  // держит строгий JSON и читает фото листа. Для этого приложения — лучшее,
+  // что вообще доступно.
+  { match: /qwen.*-vl-\d{3}b/i, label: 'Qwen3-VL (большая)', hint: 'умная и со зрением — проверит фото решения', score: 99 },
   { match: /deepseek.*(chat|v[3-9])/i, label: 'DeepSeek', hint: 'очень умная, отличный русский, быстрая', score: 98 },
   { match: /kimi-k2/i, label: 'Kimi K2', hint: 'умная, отлично знает русский', score: 96 },
   { match: /gpt-4\.[1-9](?!-mini|-nano)/i, label: 'GPT-4.1', hint: 'очень умная', score: 94 },
@@ -31,6 +35,7 @@ const PRIORITY: ModelInfo[] = [
   { match: /mistral-large|mixtral-8x22/i, label: 'Mistral Large', hint: 'умная универсальная', score: 66 },
   { match: /nemotron.*super/i, label: 'Nemotron Super', hint: 'умная и быстрая', score: 64 },
   { match: /gemma-[4-9]/i, label: 'Gemma', hint: 'толковая от Google', score: 62 },
+  { match: /qwen.*-vl-\d{1,2}b/i, label: 'Qwen3-VL (малая)', hint: 'быстрая, со зрением', score: 63 },
   { match: /qwen[-.]?3[.-]?(32b|27b|35b)/i, label: 'Qwen3', hint: 'надёжная', score: 60 },
   { match: /glm-4-flash|glm-4-air/i, label: 'GLM-4 Flash', hint: 'бесплатная и шустрая', score: 56 },
   { match: /glm-4/i, label: 'GLM-4', hint: 'толковая, хороший русский', score: 54 },
@@ -41,10 +46,17 @@ const PRIORITY: ModelInfo[] = [
   { match: /llama-?3\.1-8b/i, label: 'Llama 3.1 8B', hint: 'очень быстрая, попроще', score: 20 },
 ]
 
-// Модели, НЕ подходящие для быстрой генерации плана/чата:
-// служебные (озвучка/эмбеддинги/модерация), кодовые, мультимодальные (vision/omni),
-// и «думающие»/reasoning (медленные, часто отдают пустой content) — их автоподбор избегает.
-const EXCLUDE = /whisper|tts|guard|embed|moderat|rerank|allam|compound|safety|audio|image|flux|ocr|code|\bvl\b|vision|glm-\dv|thinking|reasoning|qwq|deepseek-r1|distill|omni|preview/i
+// Модели, НЕ подходящие для работы репетитора: служебные (озвучка, эмбеддинги,
+// модерация, распознавание), кодовые и «думающие» (медленные, часто отдают
+// пустой content).
+//
+// ЗРЕНИЕ ОТСЮДА УБРАНО НАМЕРЕННО. Раньше мультимодальные модели считались хуже
+// текстовых и выбрасывались. Это устарело: проверка живыми запросами показала,
+// что Qwen3-VL-235B и решает задачи ЕГЭ, и держит строгий JSON, и читает фото
+// листа — то есть она одновременно самая умная из доступных и единственная,
+// кем можно проверить вторую часть. Выбрасывать её значило бы отказаться от
+// целой возможности приложения.
+const EXCLUDE = /whisper|tts|guard|embed|moderat|rerank|allam|compound|safety|audio|flux|ocr|coder|image-edit|thinking|reasoning|qwq|deepseek-r1|distill|preview/i
 
 /** Плохая модель для нашей задачи (кодовая/vision/reasoning) — используется и для «перевыбрать». */
 export function isBadModel(id: string): boolean {
@@ -97,9 +109,16 @@ export function modelLabel(id: string): { label: string; hint: string } {
   return p ? { label: p.label, hint: p.hint } : { label: id, hint: '' }
 }
 
-/** Самая умная из доступных (или null, если список пуст). */
+/**
+ * Самая умная из доступных (или null, если список пуст).
+ *
+ * При равном уме предпочитаем ту, что ВИДИТ. Зрение ничего не стоит, пока им
+ * не пользуешься, а без него не работает проверка второй части по фото — и
+ * ученику пришлось бы лезть в настройки ровно в тот момент, когда он уже
+ * сфотографировал лист.
+ */
 export function pickBestModel(available: string[], provider?: string): string | null {
   const list = chatModels(available, provider)
   if (!list.length) return null
-  return [...list].sort((a, b) => modelScore(b) - modelScore(a))[0]
+  return [...list].sort((a, b) => modelScore(b) - modelScore(a) || Number(canSee(b)) - Number(canSee(a)))[0]
 }
