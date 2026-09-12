@@ -13,7 +13,12 @@ use tauri::Manager;
 /// блокировка по адресу, ключ и заголовки тут ни при чём. Из списка их всё
 /// равно не убираем: у кого-то есть VPN, и тогда они работают.
 fn allowed_api(url: &str) -> bool {
-    const ALLOWED: [&str; 12] = [
+    const ALLOWED: [&str; 17] = [
+        "https://generativelanguage.googleapis.com/",
+        "https://router.huggingface.co/",
+        "https://api.together.xyz/",
+        "https://dashscope-intl.aliyuncs.com/",
+        "https://api.sambanova.ai/",
         // Домен именно .ai: одноимённый .cn на верный токен отвечает
         // «Authentication failed». Проверено перебором.
         "https://api-inference.modelscope.ai/",

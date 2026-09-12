@@ -12,6 +12,7 @@ import { callJSON, cleanMath, isMock } from './ai'
 import { subjectName } from '../data/subjects'
 import { egeSpec } from '../data/ege2027'
 import { EGE_TASKS } from '../data/egeTasks'
+import { findKnowledge, knowledgeBlock } from './knowledge'
 
 const HONESTY =
   'ЧЕСТНОСТЬ ВАЖНЕЕ ПОЛНОТЫ: не выдумывай баллы, критерии, правила и примеры. ' +
@@ -26,6 +27,20 @@ function taskTitle(subjectId: string, taskNo?: number): string {
 function num(v: unknown, fallback = 0): number {
   const n = Number(v)
   return Number.isFinite(n) ? n : fallback
+}
+
+/**
+ * Теория Nous по этому заданию — прямо в запрос.
+ *
+ * Модель помнит школьный курс приблизительно, а у нас по каждому номеру лежит
+ * выверенное «как решать» и «где теряют балл». Отдавать разбор на память
+ * модели, имея под рукой точный текст, — значит сознательно выбирать худший
+ * источник. Ищем и по номеру, и по самому условию: если номера нет, условие
+ * всё равно подскажет тему.
+ */
+function knowHint(subjectId: string, taskNo: number | undefined, task: string): string {
+  const found = findKnowledge(task || taskTitle(subjectId, taskNo), { subjectId, taskNo, limit: 2 })
+  return found.length ? '\n\n' + knowledgeBlock(found, 1200) : ''
 }
 
 // ---------- 1. Проверка развёрнутого ответа ----------
@@ -89,7 +104,7 @@ export async function checkSolution(cfg: AppConfig, input: CheckInput): Promise<
       : '') +
     (input.solution.trim() ? '\n\nОТВЕТ УЧЕНИКА:\n' + input.solution.trim() : '')
 
-  const raw = await callJSON(cfg, { system, user, temperature: 0.2, maxTokens: 2200, images: input.photos })
+  const raw = await callJSON(cfg, { system: system + knowHint(input.subjectId, input.taskNo, input.task), user, temperature: 0.2, maxTokens: 2200, images: input.photos })
   const criteria: CriterionScore[] = Array.isArray(raw?.criteria)
     ? raw.criteria.map((c: any) => ({
         name: cleanMath(String(c?.name ?? 'Критерий')),
@@ -180,7 +195,7 @@ export async function explainMistake(cfg: AppConfig, input: MistakeInput): Promi
     '\nОТВЕТ УЧЕНИКА: ' + (input.given.trim() || '(не отвечал)') +
     (input.solution ? '\n\nАВТОРСКИЙ РАЗБОР:\n' + input.solution.slice(0, 3000) : '')
 
-  const raw = await callJSON(cfg, { system, user, temperature: 0.2, maxTokens: 700 })
+  const raw = await callJSON(cfg, { system: system + knowHint(input.subjectId, input.taskNo, input.task), user, temperature: 0.2, maxTokens: 700 })
   const why = cleanMath(String(raw?.why ?? '')).trim()
   if (!why) throw new Error('Модель не разобрала ошибку — попробуй ещё раз.')
   return {

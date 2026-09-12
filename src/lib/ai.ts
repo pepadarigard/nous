@@ -5,9 +5,10 @@
 
 import type { AppConfig, Block, Lesson, StudyPlan, SubjectGoal, SubjectSchedule } from '../types'
 import { groqRaw, llmStream, isTauri, uid, type GroqBody } from './api'
-import { activeKey } from './providers'
+import { activeKey, isLocal, keyOf, normProvider, PROVIDERS, PROVIDER_ORDER } from './providers'
 import { SUBJECTS, subjectName, WEEKDAYS } from '../data/subjects'
 import { EGE_YEAR, egeSpec } from '../data/ege2027'
+import { findKnowledge, knowledgeBlock } from './knowledge'
 
 export function isMock(): boolean {
   if (isTauri) return false
@@ -49,11 +50,25 @@ function isNetworkHiccup(e: unknown): boolean {
   )
 }
 
+/** Дневная квота кончилась — повтор не поможет, поможет другой провайдер. */
+function isOutOfQuota(e: unknown): boolean {
+  const m = String((e as any)?.message ?? e).toLowerCase()
+  return (
+    m.includes('quota') ||
+    m.includes('insufficient') ||
+    m.includes('balance') ||
+    m.includes('payment required') ||
+    m.includes('402') ||
+    m.includes('exceeded your current') ||
+    m.includes('daily limit')
+  )
+}
+
 async function groqRawRetry(cfg: AppConfig, body: GroqBody): Promise<any> {
   let last: unknown
   for (let i = 0; i < 3; i++) {
     try {
-      return await groqRaw(activeKey(cfg), body, cfg.provider ?? 'groq')
+      return await groqRaw(activeKey(cfg), body, normProvider(cfg.provider))
     } catch (e) {
       last = e
       if (i < 2 && (isRateLimit(e) || isNetworkHiccup(e))) {
@@ -62,7 +77,34 @@ async function groqRawRetry(cfg: AppConfig, body: GroqBody): Promise<any> {
         await sleep(isRateLimit(e) ? 4500 : 1200 * (i + 1))
         continue
       }
-      throw e
+      break
+    }
+  }
+
+  /**
+   * Квота у основного провайдера кончилась — идём к запасному.
+   *
+   * Бесплатные лимиты маленькие: у ModelScope это порядка двух тысяч вызовов
+   * в день, и активный день подготовки в них упирается. Показывать в такой
+   * момент «сервис отказал» глупо, если у ученика введён ключ ещё от двух
+   * сервисов: приложение должно просто взять следующий и промолчать.
+   *
+   * Идём строго по порядку из PROVIDER_ORDER — он отсортирован по тому, что
+   * реально доходит из России. Локальные пропускаем: у них нет ключа, и
+   * проверить их доступность заранее нельзя.
+   */
+  if (isOutOfQuota(last) || isRateLimit(last)) {
+    const mine = normProvider(cfg.provider)
+    for (const p of PROVIDER_ORDER) {
+      if (p === mine || isLocal(p)) continue
+      const key = keyOf(cfg, p)
+      if (!key) continue
+      try {
+        // Модель у каждого сервиса своя — чужое имя он не поймёт.
+        return await groqRaw(key, { ...body, model: PROVIDERS[p].defaultModel }, p)
+      } catch {
+        /* и этот не вышел — пробуем следующий */
+      }
     }
   }
   throw last
@@ -576,13 +618,23 @@ const EGE_FACTS = `
 `.trim()
 
 /** Системный промт репетитора (общий для обычного и стримингового чата). */
-function tutorSystem(studentCtx?: string): string {
+function tutorSystem(studentCtx?: string, knowledge?: string): string {
   return (
     'Ты — опытный репетитор по подготовке к ЕГЭ (Россия). Объясняешь по-русски, по шагам, конкретно и по делу.\n\n' +
     'ЧЕСТНОСТЬ — ГЛАВНОЕ ПРАВИЛО:\n' +
     '- НИКОГДА не выдумывай: правила языка, примеры слов, номера заданий, баллы, названия книг, ссылки.\n' +
     '- Приводи пример, только если на 100% уверен, что он верный. Сомневаешься — не приводи вовсе.\n' +
     '- Если не знаешь точно — прямо скажи «не уверен» и посоветуй проверить на ФИПИ или в учебнике.\n' +
+    // Указание про справочник добавляется ТОЛЬКО когда справочник реально
+    // приложен. Проверка показала, почему: с этой строчкой в пустом запросе
+    // модель писала «Источник: справочник Nous» под выдуманными цифрами —
+    // то есть ссылка на проверенные данные прикрывала ровно ту выдумку, от
+    // которой должна была защищать.
+    (knowledge
+      ? '- Ниже приведён СПРАВОЧНИК NOUS — отвечай ПО НЕМУ, а не по памяти. Он собран под этот экзамен и проверен, ' +
+        'а твоя память о русской орфографии, формулах и числах приблизительна. Расходится — прав справочник, ' +
+        'и скажи ученику, что ответ из справочника Nous. Чего в справочнике НЕТ — не приписывай ему.\n'
+      : '- Ссылаться на «справочник Nous» нельзя: сейчас он тебе не приложен.\n') +
     '- Лучше короткий точный ответ, чем длинный с ошибками. Никакой «воды» и дежурной мотивации.\n\n' +
     EGE_FACTS + '\n\n' +
     'КАК ОТВЕЧАТЬ:\n' +
@@ -590,16 +642,36 @@ function tutorSystem(studentCtx?: string): string {
     '- Разбор задания: сначала краткий алгоритм, потом короткий пример решения.\n' +
     '- Практику советуй на реальных площадках: РешуЕГЭ/СдамГИА, открытый банк ФИПИ, для информатики — kompege.ru.\n' +
     '- Оформляй в Markdown: подзаголовки (##), списки (- ), жирный (**важное**). ' + MATH_RULE +
-    (studentCtx ? `\n\nТвой ученик: ${studentCtx}. Учитывай его предметы и уровень.` : '')
+    (studentCtx ? `\n\nТвой ученик: ${studentCtx}. Учитывай его предметы и уровень.` : '') +
+    (knowledge ? '\n\n' + knowledge : '')
   )
 }
 
+/**
+ * Что из справочника Nous относится к заданному вопросу.
+ *
+ * Ищем по ПОСЛЕДНЕМУ вопросу ученика, а не по всей переписке: справочник
+ * подбирается под то, о чём спросили сейчас, и хвост прошлых тем только сбивал
+ * бы поиск. Если предмет у ученика один — поднимаем его куски выше, но чужие
+ * не выбрасываем: про ударения может спросить и математик.
+ */
+function knowledgeFor(messages: { role: string; content: string }[], subjects?: string[]): string {
+  const last = [...messages].reverse().find((m) => m.role === 'user')?.content ?? ''
+  if (!last.trim()) return ''
+  return knowledgeBlock(findKnowledge(last, { subjectId: subjects?.length === 1 ? subjects[0] : undefined, limit: 4 }))
+}
+
 /** Чат-репетитор. studentCtx — краткая справка об ученике (предметы, баллы, цели), чтобы отвечать точнее. */
-export async function tutorChat(cfg: AppConfig, messages: { role: string; content: string }[], studentCtx?: string): Promise<string> {
+export async function tutorChat(
+  cfg: AppConfig,
+  messages: { role: string; content: string }[],
+  studentCtx?: string,
+  subjects?: string[],
+): Promise<string> {
   if (isMock()) return 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
   const resp = await groqRawRetry(cfg, {
     model: cfg.textModel,
-    messages: [{ role: 'system', content: tutorSystem(studentCtx) }, ...messages],
+    messages: [{ role: 'system', content: tutorSystem(studentCtx, knowledgeFor(messages, subjects)) }, ...messages],
     temperature: 0.4,
     max_tokens: 1400,
     reasoning_format: 'hidden',
@@ -617,6 +689,7 @@ export async function tutorChatStream(
   messages: { role: string; content: string }[],
   studentCtx: string | undefined,
   onDelta: (chunk: string) => void,
+  subjects?: string[],
 ): Promise<string> {
   if (isMock()) {
     const demo = 'Демо-ответ репетитора (в браузере ИИ выключен). В приложении здесь будет реальный ответ.'
@@ -629,7 +702,7 @@ export async function tutorChatStream(
       activeKey(cfg),
       {
         model: cfg.textModel,
-        messages: [{ role: 'system', content: tutorSystem(studentCtx) }, ...messages],
+        messages: [{ role: 'system', content: tutorSystem(studentCtx, knowledgeFor(messages, subjects)) }, ...messages],
         temperature: 0.4,
         max_tokens: 1400,
         reasoning_format: 'hidden',
@@ -644,7 +717,7 @@ export async function tutorChatStream(
     return cleanMath(full, true)
   } catch {
     if (acc) return cleanMath(acc, true) // стрим оборвался на середине — отдаём, что успели
-    return await tutorChat(cfg, messages, studentCtx)
+    return await tutorChat(cfg, messages, studentCtx, subjects)
   }
 }
 

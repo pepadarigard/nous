@@ -36,6 +36,61 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     defaultModel: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
   },
   /**
+   * Google Gemini через их OpenAI-совместимый адрес. Доступен из России
+   * (проверено), зрение есть, бесплатный лимит из всех найденных самый
+   * щедрый — порядка полутора тысяч запросов в день.
+   */
+  gemini: {
+    id: 'gemini',
+    name: 'Google Gemini',
+    base: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    keysUrl: 'https://aistudio.google.com/apikey',
+    keyPrefix: 'AIza',
+    hint: 'щедрый бесплатный лимит, зрение; ключ берётся в Google AI Studio',
+    defaultModel: 'gemini-2.5-flash',
+  },
+  /**
+   * Hugging Face: один ключ — доступ к чужим серверам сразу нескольких
+   * поставщиков. В списке есть и Qwen3-VL-235B, и Llama 4 — то есть зрение
+   * и ум. Бесплатная квота помесячная.
+   */
+  huggingface: {
+    id: 'huggingface',
+    name: 'Hugging Face',
+    base: 'https://router.huggingface.co/v1',
+    keysUrl: 'https://huggingface.co/settings/tokens',
+    keyPrefix: 'hf_',
+    hint: 'больше сотни моделей, включая Qwen3-VL и Llama 4; месячная бесплатная квота',
+    defaultModel: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
+  },
+  together: {
+    id: 'together',
+    name: 'Together AI',
+    base: 'https://api.together.xyz/v1',
+    keysUrl: 'https://api.together.ai/settings/api-keys',
+    keyPrefix: '',
+    hint: 'есть полностью бесплатные модели, в том числе со зрением',
+    defaultModel: 'meta-llama/Llama-Vision-Free',
+  },
+  dashscope: {
+    id: 'dashscope',
+    name: 'Qwen (DashScope)',
+    base: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    keysUrl: 'https://modelstudio.console.alibabacloud.com',
+    keyPrefix: 'sk-',
+    hint: 'Qwen напрямую от разработчиков, есть qwen-vl; бесплатная квота новым',
+    defaultModel: 'qwen-vl-plus',
+  },
+  sambanova: {
+    id: 'sambanova',
+    name: 'SambaNova',
+    base: 'https://api.sambanova.ai/v1',
+    keysUrl: 'https://cloud.sambanova.ai/apis',
+    keyPrefix: '',
+    hint: 'очень быстрый, бесплатный тариф; DeepSeek и Llama',
+    defaultModel: 'DeepSeek-V3.1',
+  },
+  /**
    * Mistral — запасной, тоже доходит из России. На бесплатном тарифе доступны
    * только небольшие модели (ministral 8B/14B, pixtral-12b): зрение есть,
    * но задачи ЕГЭ они решают плохо. Годится как подстраховка, не как основной.
@@ -103,7 +158,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://api.cerebras.ai/v1',
     keysUrl: 'https://cloud.cerebras.ai',
     keyPrefix: 'csk-',
-    hint: 'сверхбыстрый; щедрый бесплатный лимит',
+    hint: 'из России НЕ работает: блокирует Cloudflare. Нужен VPN',
     defaultModel: 'gpt-oss-120b',
   },
   nvidia: {
@@ -112,7 +167,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://integrate.api.nvidia.com/v1',
     keysUrl: 'https://build.nvidia.com',
     keyPrefix: 'nvapi-',
-    hint: 'щедрые бесплатные кредиты; Llama, DeepSeek, Nemotron',
+    hint: 'из России НЕ работает: отвечает 451. Нужен VPN',
     defaultModel: 'meta/llama-3.3-70b-instruct',
   },
   deepinfra: {
@@ -130,7 +185,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://api.novita.ai/v3/openai',
     keysUrl: 'https://novita.ai/settings/key-management',
     keyPrefix: '',
-    hint: 'DeepSeek, Llama, Qwen; бесплатные кредиты',
+    hint: 'из России НЕ работает: запрос уходит в никуда. Нужен VPN',
     defaultModel: 'meta-llama/llama-3.3-70b-instruct',
   },
   github: {
@@ -139,7 +194,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://models.github.ai/inference',
     keysUrl: 'https://github.com/settings/tokens',
     keyPrefix: 'github_pat_',
-    hint: 'нужен аккаунт GitHub (токен с правом models:read)',
+    hint: 'сервис закрывается — отвечает «github models retirement»',
     defaultModel: 'openai/gpt-4o-mini',
   },
   groq: {
@@ -148,7 +203,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://api.groq.com/openai/v1',
     keysUrl: 'https://console.groq.com/keys',
     keyPrefix: 'gsk_',
-    hint: 'очень быстрый; из России нужен VPN',
+    hint: 'из России НЕ работает: 403. Нужен VPN',
     defaultModel: 'qwen/qwen3-32b',
   },
 }
@@ -156,7 +211,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
 /** Порядок показа в интерфейсе (лучшие для России — первыми). */
 // Порядок проверен живыми запросами с российского адреса: сначала то, что
 // реально доходит, в конце — заблокированное по стране.
-export const PROVIDER_ORDER: Provider[] = ['modelscope', 'mistral', 'ollama', 'lmstudio', 'siliconflow', 'zhipu', 'nvidia', 'deepinfra', 'novita', 'github', 'openrouter', 'cerebras', 'groq']
+export const PROVIDER_ORDER: Provider[] = ['modelscope', 'gemini', 'huggingface', 'together', 'dashscope', 'sambanova', 'mistral', 'ollama', 'lmstudio', 'siliconflow', 'zhipu', 'deepinfra', 'openrouter', 'cerebras', 'groq', 'nvidia', 'novita', 'github']
 
 /** Локальные провайдеры: работают без ключа и без интернета. */
 export const LOCAL_PROVIDERS: Provider[] = ['ollama', 'lmstudio']

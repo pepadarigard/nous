@@ -509,6 +509,9 @@ export const useStore = create<Store>((set, get) => {
             acc += delta
             if (!reveal) reveal = setInterval(tick, 20)
           },
+          // Предметы нужны поиску по справочнику: по одному предмету он
+          // поднимает нужные разделы, а не гадает между физикой и русским.
+          d.subjects,
         )
         streamDone = true
         if (!alive()) { stopReveal(); return }
