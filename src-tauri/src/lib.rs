@@ -59,6 +59,39 @@ fn http() -> &'static reqwest::Client {
     })
 }
 
+/// Клиент, который ХОДИТ через системный прокси — то есть через VPN ученика.
+///
+/// Зачем он понадобился. Обход прокси выше сделан правильно и остаётся по
+/// умолчанию: мёртвый прокси от выключенного VPN ломал запросы к сервисам,
+/// которые и так доступны напрямую. Но у обхода есть обратная сторона, и она
+/// вскрылась на живом замере: у ученика ВКЛЮЧЁН VPN прокси-типа, через него
+/// OpenRouter, Groq и Cerebras отвечают нормально, а приложение всё равно
+/// получает от них 403 — потому что ходит мимо. То есть VPN есть, а толку от
+/// него приложению нет.
+///
+/// Поэтому выбор отдаётся ученику: галочка в настройках. Выключена — как
+/// раньше, напрямую; включена — через прокси, и заблокированные сервисы
+/// оживают.
+fn http_proxied() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(150))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .expect("reqwest proxied client")
+    })
+}
+
+/// Каким клиентом идти: `true` — через системный прокси (VPN), `false` — мимо.
+fn client(use_proxy: bool) -> &'static reqwest::Client {
+    if use_proxy {
+        http_proxied()
+    } else {
+        http()
+    }
+}
+
 fn state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("state.json"))
@@ -105,12 +138,17 @@ fn save_state(app: tauri::AppHandle, data: String) -> Result<(), String> {
 
 /// Прокси-запрос к провайдеру ИИ (OpenAI-совместимый chat/completions). Тело формируется на фронте.
 #[tauri::command]
-async fn llm_request(api_key: String, body: String, base: String) -> Result<String, String> {
+async fn llm_request(
+    api_key: String,
+    body: String,
+    base: String,
+    use_proxy: Option<bool>,
+) -> Result<String, String> {
     let url = format!("{}/chat/completions", base.trim_end_matches('/'));
     if !allowed_api(&url) {
         return Err("Недопустимый адрес сервиса ИИ".into());
     }
-    let resp = http()
+    let resp = client(use_proxy.unwrap_or(false))
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
@@ -131,13 +169,14 @@ async fn llm_stream(
     body: String,
     base: String,
     on_chunk: tauri::ipc::Channel<String>,
+    use_proxy: Option<bool>,
 ) -> Result<String, String> {
     use futures_util::StreamExt;
     let url = format!("{}/chat/completions", base.trim_end_matches('/'));
     if !allowed_api(&url) {
         return Err("Недопустимый адрес сервиса ИИ".into());
     }
-    let resp = http()
+    let resp = client(use_proxy.unwrap_or(false))
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
@@ -353,11 +392,11 @@ async fn bank_image(url: String) -> Result<String, String> {
 
 /// GET с авторизацией к провайдеру (список моделей, проверка ключа).
 #[tauri::command]
-async fn llm_get(api_key: String, url: String) -> Result<String, String> {
+async fn llm_get(api_key: String, url: String, use_proxy: Option<bool>) -> Result<String, String> {
     if !allowed_api(&url) {
         return Err("Недопустимый адрес сервиса ИИ".into());
     }
-    let resp = http()
+    let resp = client(use_proxy.unwrap_or(false))
         .get(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("X-Title", "Nous")

@@ -315,6 +315,27 @@ export default function Settings() {
           </button>
           {checkMsg && <span className="small" style={{ color: checkMsg.ok ? 'var(--success)' : 'var(--danger)' }}>{checkMsg.ok ? '✓ ' : '✕ '}{checkMsg.text}</span>}
         </div>
+
+        {/* Без этой галочки включённый VPN приложению бесполезен: оно ходит
+            мимо системного прокси. Замер это подтвердил — через прокси
+            OpenRouter отвечает, мимо прокси отдаёт 403. */}
+        <label className="row" style={{ gap: 8, marginTop: 14, alignItems: 'flex-start' }}>
+          <input
+            type="checkbox"
+            checked={data.config.useProxy === true}
+            onChange={(e) => setConfig({ useProxy: e.target.checked })}
+            style={{ marginTop: 3 }}
+          />
+          <span className="small">
+            <b>Ходить к ИИ через VPN</b> (системный прокси)
+            <div className="muted">
+              Включи, если у тебя работает VPN и нужен сервис, который блокирует Россию, — OpenRouter,
+              Groq, Cerebras, Google Gemini. Без галочки приложение ходит напрямую и VPN не замечает.
+              Если VPN нет или он выключен — держи выключенной: мёртвый прокси ломает и те сервисы,
+              что работают без него.
+            </div>
+          </span>
+        </label>
       </div>
 
       <div className="card" style={{ marginBottom: 18 }}>

@@ -36,9 +36,14 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     defaultModel: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
   },
   /**
-   * Google Gemini через их OpenAI-совместимый адрес. Доступен из России
-   * (проверено), зрение есть, бесплатный лимит из всех найденных самый
-   * щедрый — порядка полутора тысяч запросов в день.
+   * Google Gemini. Зрение есть, бесплатный лимит самый щедрый из найденных.
+   *
+   * НО из России он не работает, и вот в чём была моя ошибка: адрес отвечает,
+   * запрос без ключа возвращает «передайте верный ключ» — и я счёл это
+   * доступностью. Это неверно: Google проверяет страну не на этом шаге, а
+   * когда ключ настоящий, и тогда отвечает отказом по региону. Ученик
+   * проверил на живом аккаунте — не работает. Оставляем в списке для тех, у
+   * кого есть VPN: с галочкой «ходить через VPN» сервис оживает.
    */
   gemini: {
     id: 'gemini',
@@ -46,7 +51,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://generativelanguage.googleapis.com/v1beta/openai',
     keysUrl: 'https://aistudio.google.com/apikey',
     keyPrefix: 'AIza',
-    hint: 'щедрый бесплатный лимит, зрение; ключ берётся в Google AI Studio',
+    hint: 'из России НЕ работает: Google отказывает по региону. С VPN — щедрый лимит и зрение',
     defaultModel: 'gemini-2.5-flash',
   },
   /**
@@ -60,7 +65,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://router.huggingface.co/v1',
     keysUrl: 'https://huggingface.co/settings/tokens',
     keyPrefix: 'hf_',
-    hint: 'больше сотни моделей, включая Qwen3-VL и Llama 4; месячная бесплатная квота',
+    hint: 'адрес доходит из России; больше сотни моделей, включая Qwen3-VL и Llama 4. Работу с ключом не проверяли',
     defaultModel: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
   },
   together: {
@@ -69,7 +74,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://api.together.xyz/v1',
     keysUrl: 'https://api.together.ai/settings/api-keys',
     keyPrefix: '',
-    hint: 'есть полностью бесплатные модели, в том числе со зрением',
+    hint: 'адрес доходит из России; есть бесплатные модели со зрением. Работу с ключом не проверяли',
     defaultModel: 'meta-llama/Llama-Vision-Free',
   },
   dashscope: {
@@ -78,7 +83,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
     keysUrl: 'https://modelstudio.console.alibabacloud.com',
     keyPrefix: 'sk-',
-    hint: 'Qwen напрямую от разработчиков, есть qwen-vl; бесплатная квота новым',
+    hint: 'адрес доходит из России; Qwen от разработчиков, есть qwen-vl. Работу с ключом не проверяли',
     defaultModel: 'qwen-vl-plus',
   },
   sambanova: {
@@ -87,7 +92,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://api.sambanova.ai/v1',
     keysUrl: 'https://cloud.sambanova.ai/apis',
     keyPrefix: '',
-    hint: 'очень быстрый, бесплатный тариф; DeepSeek и Llama',
+    hint: 'адрес доходит из России; быстрый, DeepSeek и Llama. Работу с ключом не проверяли',
     defaultModel: 'DeepSeek-V3.1',
   },
   /**
@@ -131,7 +136,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     // Проверено запросом с российского адреса: сервис отвечает 403 «Access
     // denied by security policy» независимо от заголовков. Это блокировка по
     // адресу, ключ тут ни при чём — и обойти её со стороны приложения нельзя.
-    hint: 'из России НЕ работает: блокирует по адресу (403). Нужен VPN',
+    hint: 'из России НЕ работает: 403 по адресу. С включённой галочкой «через VPN» — работает',
     defaultModel: 'openai/gpt-oss-120b:free',
   },
   siliconflow: {
@@ -158,7 +163,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://api.cerebras.ai/v1',
     keysUrl: 'https://cloud.cerebras.ai',
     keyPrefix: 'csk-',
-    hint: 'из России НЕ работает: блокирует Cloudflare. Нужен VPN',
+    hint: 'из России НЕ работает: Cloudflare. С включённой галочкой «через VPN» — работает',
     defaultModel: 'gpt-oss-120b',
   },
   nvidia: {
@@ -203,7 +208,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
     base: 'https://api.groq.com/openai/v1',
     keysUrl: 'https://console.groq.com/keys',
     keyPrefix: 'gsk_',
-    hint: 'из России НЕ работает: 403. Нужен VPN',
+    hint: 'из России НЕ работает: 403. С включённой галочкой «через VPN» — работает',
     defaultModel: 'qwen/qwen3-32b',
   },
 }
@@ -211,7 +216,7 @@ export const PROVIDERS: Record<Provider, ProviderInfo> = {
 /** Порядок показа в интерфейсе (лучшие для России — первыми). */
 // Порядок проверен живыми запросами с российского адреса: сначала то, что
 // реально доходит, в конце — заблокированное по стране.
-export const PROVIDER_ORDER: Provider[] = ['modelscope', 'gemini', 'huggingface', 'together', 'dashscope', 'sambanova', 'mistral', 'ollama', 'lmstudio', 'siliconflow', 'zhipu', 'deepinfra', 'openrouter', 'cerebras', 'groq', 'nvidia', 'novita', 'github']
+export const PROVIDER_ORDER: Provider[] = ['modelscope', 'huggingface', 'together', 'dashscope', 'sambanova', 'mistral', 'ollama', 'lmstudio', 'siliconflow', 'zhipu', 'deepinfra', 'gemini', 'openrouter', 'cerebras', 'groq', 'nvidia', 'novita', 'github']
 
 /** Локальные провайдеры: работают без ключа и без интернета. */
 export const LOCAL_PROVIDERS: Provider[] = ['ollama', 'lmstudio']

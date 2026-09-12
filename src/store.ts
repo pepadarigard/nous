@@ -3,7 +3,7 @@ import type { AppConfig, AppData, Attempt, Block, ExamVariant, LessonBrief, Mate
 import { emptyData, emptyRules } from './types'
 import { generateStarterSet, bankKey } from './lib/taskgen'
 import { catchUpPlan } from './lib/schedule'
-import { loadState, saveState, uid, humanError, deleteMaterialFiles } from './lib/api'
+import { loadState, saveState, setUseProxy, uid, humanError, deleteMaterialFiles } from './lib/api'
 import { tutorChatStream } from './lib/ai'
 import { subjectName } from './data/subjects'
 import { computeStats, type Celebration } from './lib/stats'
@@ -93,6 +93,8 @@ export const useStore = create<Store>((set, get) => {
     // Штамп времени ставим здесь, в единственной точке записи: любое изменение
     // проходит через persist, и забыть его негде.
     next.savedAt = new Date().toISOString()
+    // Сетевой слой должен знать про VPN сразу, а не после перезапуска.
+    setUseProxy(next.config.useProxy === true)
     saveState(next, bankChanged)
       .then(() => {
         if (get().saveError) set({ saveError: '' })
@@ -166,6 +168,7 @@ export const useStore = create<Store>((set, get) => {
       const base = emptyData()
       const data = saved ? { ...base, ...saved, config: { ...base.config, ...saved.config } } : base
       set({ data, loaded: true })
+      setUseProxy(data.config.useProxy === true)
       // Переезд со старой раскладки: раньше задания лежали внутри state.json.
       // Первая же обычная запись сохраняет состояние БЕЗ них, и без этой строчки
       // банк старого пользователя молча исчез бы. Пишем его сразу и целиком.

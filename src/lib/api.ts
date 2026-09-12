@@ -76,6 +76,18 @@ export async function saveState(data: AppData, bankChanged = true): Promise<void
   if (bankChanged) localStorage.setItem(BANK_KEY, JSON.stringify(questions ?? []))
 }
 
+/**
+ * Пускать ли запросы к ИИ через системный прокси (VPN).
+ *
+ * Значение приходит из настроек и обновляется при каждом сохранении. Живёт
+ * здесь, а не в аргументах: иначе его пришлось бы протаскивать через все
+ * уровни вызовов ради одного флажка.
+ */
+let viaProxy = false
+export function setUseProxy(v: boolean): void {
+  viaProxy = v
+}
+
 export interface GroqBody {
   model: string
   messages: unknown[]
@@ -118,7 +130,7 @@ export async function groqRaw(apiKey: string, body: GroqBody, provider: Provider
   const bodyStr = JSON.stringify(payload)
   let text: string
   if (isTauri) {
-    text = await invoke<string>('llm_request', { apiKey, body: bodyStr, base: p.base })
+    text = await invoke<string>('llm_request', { apiKey, body: bodyStr, base: p.base, useProxy: viaProxy })
   } else {
     const res = await fetch(`${p.base}/chat/completions`, {
       method: 'POST',
@@ -175,6 +187,7 @@ export async function llmStream(
       body: JSON.stringify(payload),
       base: p.base,
       onChunk: ch,
+      useProxy: viaProxy,
     })
   }
   const noStream = { ...body }
@@ -189,7 +202,7 @@ export async function llmStream(
 async function authGet(apiKey: string, url: string): Promise<any> {
   let text: string
   if (isTauri) {
-    text = await invoke<string>('llm_get', { apiKey, url })
+    text = await invoke<string>('llm_get', { apiKey, url, useProxy: viaProxy })
   } else {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } })
     text = await res.text()
